@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { 
   Building, 
   CheckCircle2, 
@@ -61,11 +61,72 @@ import {
   FileSpreadsheet
 } from 'lucide-react';
 
+// --- IMPORTS FIREBASE (Nécessaires pour la persistance des données) ---
+import { initializeApp } from 'firebase/app';
+import { getAuth, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
+import { getFirestore, doc, setDoc, getDoc, setLogLevel } from 'firebase/firestore';
+
+
+// --- VARIABLES GLOBALES FOURNIES PAR L'ENVIRONNEMENT ---
+// Ces variables sont nécessaires pour initialiser Firebase dans l'environnement.
+const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : null;
+const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+
+// Initialisation de Firebase
+let app, db, auth;
+if (firebaseConfig) {
+    // setLogLevel('debug'); // Décommenter pour le débogage Firebase
+    app = initializeApp(firebaseConfig);
+    db = getFirestore(app);
+    auth = getAuth(app);
+}
+
+// Clé d'API factice (l'appel réel doit passer par une fonction Firebase)
+const DUMMY_API_KEY = ""; 
+
+// --- UTILS ---
+const resizeImage = (file) => {
+    return new Promise((resolve) => {
+        const reader = new FileReader();
+        reader.onload = (event) => {
+            const img = new Image();
+            img.onload = () => {
+                const canvas = document.createElement('canvas');
+                const MAX_SIZE = 1200;
+                let width = img.width;
+                let height = img.height;
+                
+                if (width > height) {
+                    if (width > MAX_SIZE) {
+                        height *= MAX_SIZE / width;
+                        width = MAX_SIZE;
+                    }
+                } else {
+                    if (height > MAX_SIZE) {
+                        width *= MAX_SIZE / height;
+                        height = MAX_SIZE;
+                    }
+                }
+                canvas.width = width;
+                canvas.height = height;
+                
+                const ctx = canvas.getContext('2d');
+                ctx.drawImage(img, 0, 0, width, height);
+                resolve(canvas.toDataURL('image/jpeg', 0.7)); 
+            };
+            img.src = event.target.result;
+        };
+        reader.readAsDataURL(file);
+    });
+};
+
 // --- COMPOSANT ÉDITEUR RICHE AVEC GEMINI ---
+// Ce composant appelle le point de terminaison /api/reformulate qui doit être
+// géré par une Firebase Function sécurisée.
 const RichTextEditor = ({ value, onChange, placeholder, itemId }) => {
     const editorRef = useRef(null);
     const [isReformulating, setIsReformulating] = useState(false);
-    const apiKey = ""; 
 
     useEffect(() => {
         if (editorRef.current) {
@@ -93,30 +154,51 @@ const RichTextEditor = ({ value, onChange, placeholder, itemId }) => {
 
         setIsReformulating(true);
         try {
-            const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    contents: [{ 
-                        parts: [{ 
-                            text: `Tu es un expert en bâtiment. Reformule le constat d'audit suivant de manière technique, précise et professionnelle (ton neutre, vocabulaire du bâtiment). Conserve le sens original. Texte : "${textToRefine}"` 
-                        }] 
-                    }]
-                })
-            });
+            const fetchWithBackoff = async (url, options, maxRetries = 5, delay = 1000) => {
+                for (let i = 0; i < maxRetries; i++) {
+                    try {
+                        const response = await fetch(url, options);
+                        if (response.ok) return response;
+                        if (response.status === 429 || response.status >= 500) {
+                            await new Promise(resolve => setTimeout(resolve, delay * Math.pow(2, i)));
+                            continue;
+                        }
+                        throw new Error(`API error: ${response.statusText}`);
+                    } catch (error) {
+                        if (i === maxRetries - 1) throw error;
+                        await new Promise(resolve => setTimeout(resolve, delay * Math.pow(2, i)));
+                    }
+                }
+                throw new Error("Maximum retries reached for API call.");
+            };
+
+            const response = await fetchWithBackoff(
+                `/api/reformulate`, 
+                {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ 
+                        text: textToRefine, 
+                        prompt: "Tu es un expert en bâtiment. Reformule le constat d'audit suivant de manière technique, précise et professionnelle (ton neutre, vocabulaire du bâtiment). Conserve le sens original. Texte : "
+                    })
+                }
+            );
             
             const data = await response.json();
-            const reformulatedText = data.candidates?.[0]?.content?.parts?.[0]?.text;
+            const reformulatedText = data.text; 
 
             if (reformulatedText) {
                 if (editorRef.current) {
                     editorRef.current.innerHTML = reformulatedText;
                     onChange(reformulatedText); 
                 }
+            } else {
+                 console.error("Gemini Response Error:", data);
+                 alert("La reformulation a échoué. Veuillez vérifier la console pour plus de détails.");
             }
         } catch (error) {
             console.error("Erreur Gemini:", error);
-            alert("Impossible de reformuler le texte pour le moment.");
+            alert("Impossible de reformuler le texte pour le moment. L'API est peut-être indisponible ou la fonction Firebase n'est pas déployée/configurée.");
         } finally {
             setIsReformulating(false);
         }
@@ -204,165 +286,192 @@ const MultiSelectScenario = ({ work, onChange, options }) => {
 };
 
 const AuditFacade = () => {
-  const [viewMode, setViewMode] = useState('building'); 
-  const [buildings, setBuildings] = useState([{ id: 1, name: "Bâtiment A" }]);
-  const [activeBuildingId, setActiveBuildingId] = useState(1);
-  const [tabs, setTabs] = useState([
-    { id: 'structure', name: 'Structure' },
-    { id: 'facade', name: 'Façade' },
-    { id: 'toiture', name: 'Toiture' },
-    { id: 'communs', name: 'Communs' }, 
-    { id: 'caves', name: 'Caves' }, 
-    { id: 'stationnement', name: 'Stationnement' },
-    { id: 'ventilation', name: 'Ventilation' }, 
-    { id: 'poubelle', name: 'Local poubelle' },
-    { id: 'exterieur', name: 'Extérieur' },
-  ]);
-  const [activeTabId, setActiveTabId] = useState('structure');
-  const [editingId, setEditingId] = useState(null); 
-  const [editingType, setEditingType] = useState(null); 
-  const [tempName, setTempName] = useState("");
-  const [sectionData, setSectionData] = useState({}); 
+    const [isAuthReady, setIsAuthReady] = useState(false);
+    const [userId, setUserId] = useState(null);
+    const [isSaving, setIsSaving] = useState(false);
 
-  // --- DONNEES IDENTIFICATION ---
-  const [idData, setIdData] = useState({
-    address: "", cadastreRef: "", cadastrePhoto: null, coproPhoto: null,
-    registration: "", siret: "", typology: "", hasElevator: false,
-    buildingCount: "", lotCount: "", constructionPeriod: "", hasUndergroundParking: false,
-    // Modification: valeurs par défaut à 'inconnu' pour les menus déroulants
-    risks: { 
-        flood: 'inconnu', 
-        waterTable: 'inconnu', 
-        seism: 'inconnu', 
-        groundMovement: 'inconnu', 
-        clay: 'inconnu', 
-        radon: 'inconnu', 
-        industrial: 'inconnu', 
-        nuclear: 'inconnu', 
-        dangerousMaterial: 'inconnu', 
-        soilPollution: 'inconnu' 
-    }
-  });
+    const [viewMode, setViewMode] = useState('building'); 
+    const [buildings, setBuildings] = useState([{ id: 1, name: "Bâtiment A" }]);
+    const [activeBuildingId, setActiveBuildingId] = useState(1);
+    const [tabs, setTabs] = useState([
+        { id: 'structure', name: 'Structure' },
+        { id: 'facade', name: 'Façade' },
+        { id: 'toiture', name: 'Toiture' },
+        { id: 'communs', name: 'Communs' }, 
+        { id: 'caves', name: 'Caves' }, 
+        { id: 'stationnement', name: 'Stationnement' },
+        { id: 'ventilation', name: 'Ventilation' }, 
+        { id: 'poubelle', name: 'Local poubelle' },
+        { id: 'exterieur', name: 'Extérieur' },
+    ]);
+    const [activeTabId, setActiveTabId] = useState('structure');
+    const [editingId, setEditingId] = useState(null); 
+    const [editingType, setEditingType] = useState(null); 
+    const [tempName, setTempName] = useState("");
+    const [sectionData, setSectionData] = useState({}); 
 
-  const [auditItems, setAuditItems] = useState([
-    // Onglet STRUCTURE
-    { id: 101, buildingId: 1, tabId: 'structure', label: "Descriptif général", state: null, comment: "", photos: [] },
-    { id: 102, buildingId: 1, tabId: 'structure', label: "Caractéristiques constructives & matériaux", state: null, comment: "", photos: [] },
-    { id: 103, buildingId: 1, tabId: 'structure', label: "Etat d’entretien général et désordres", state: null, comment: "", photos: [], section: 'secondary', customColor: 'bg-gray-50 border-gray-200', thermalImprovement: 'non' },
+    const [idData, setIdData] = useState({
+        address: "", cadastreRef: "", cadastrePhoto: null, coproPhoto: null,
+        registration: "", siret: "", typology: "", hasElevator: false,
+        buildingCount: "", lotCount: "", constructionPeriod: "", hasUndergroundParking: false,
+        risks: { 
+            flood: 'inconnu', waterTable: 'inconnu', seism: 'inconnu', groundMovement: 'inconnu', 
+            clay: 'inconnu', radon: 'inconnu', industrial: 'inconnu', nuclear: 'inconnu', 
+            dangerousMaterial: 'inconnu', soilPollution: 'inconnu' 
+        }
+    });
 
-    // Onglet FACADE
-    { id: 1, buildingId: 1, tabId: 'facade', label: "Caractéristiques constructives & matériaux", state: null, comment: "", photos: [] },
-    { id: 2, buildingId: 1, tabId: 'facade', label: "Ouvrages d’étanchéités", state: null, comment: "", photos: [] },
-    { id: 3, buildingId: 1, tabId: 'facade', label: "Ferronneries", state: null, comment: "", photos: [] },
-    { id: 4, buildingId: 1, tabId: 'facade', label: "Menuiseries", state: null, comment: "", photos: [] },
-    { id: 5, buildingId: 1, tabId: 'facade', label: "Eaux pluviales – Eaux usées", state: null, comment: "", photos: [] },
-    { id: 6, buildingId: 1, tabId: 'facade', label: "Balcon", state: null, comment: "", photos: [] },
-    { id: 7, buildingId: 1, tabId: 'facade', label: "Contrainte de mitoyenneté", state: null, comment: "", photos: [] },
-    { id: 8, buildingId: 1, tabId: 'facade', label: "Les gestes d’usages à connaitre", state: null, comment: "", photos: [] },
-    { id: 9, buildingId: 1, tabId: 'facade', label: "Etat d’entretien général", state: null, comment: "", photos: [], section: 'secondary', customColor: 'bg-gray-50 border-gray-200', thermalImprovement: 'non' },
-    { id: 10, buildingId: 1, tabId: 'facade', label: "Caractéristiques thermiques", state: null, comment: "", photos: [], section: 'secondary', customColor: 'bg-purple-50 border-purple-200' },
-    
-    // Onglet TOITURE
-    { id: 201, buildingId: 1, tabId: 'toiture', label: "Accès", state: null, comment: "", photos: [] },
-    { id: 202, buildingId: 1, tabId: 'toiture', label: "Charpente & combles", state: null, comment: "", photos: [] },
-    { id: 203, buildingId: 1, tabId: 'toiture', label: "Ouvrages en toiture", state: null, comment: "", photos: [] },
-    { id: 204, buildingId: 1, tabId: 'toiture', label: "Gestion des eaux pluviales", state: null, comment: "", photos: [] },
-    { id: 205, buildingId: 1, tabId: 'toiture', label: "Contrats d’entretiens", state: null, comment: "", photos: [] },
-    { id: 206, buildingId: 1, tabId: 'toiture', label: "Ferronneries", state: null, comment: "", photos: [] },
-    { id: 207, buildingId: 1, tabId: 'toiture', label: "Etat d’entretien général", state: null, comment: "", photos: [], section: 'secondary', customColor: 'bg-gray-50 border-gray-200', thermalImprovement: 'non' },
-    { id: 208, buildingId: 1, tabId: 'toiture', label: "Caractéristiques thermiques", state: null, comment: "", photos: [], section: 'secondary', customColor: 'bg-purple-50 border-purple-200' },
+    const [auditItems, setAuditItems] = useState([
+        { id: 101, buildingId: 1, tabId: 'structure', label: "Descriptif général", state: null, comment: "", photos: [] },
+        { id: 102, buildingId: 1, tabId: 'structure', label: "Caractéristiques constructives & matériaux", state: null, comment: "", photos: [] },
+        { id: 103, buildingId: 1, tabId: 'structure', label: "Etat d’entretien général et désordres", state: null, comment: "", photos: [], section: 'secondary', customColor: 'bg-gray-50 border-gray-200', thermalImprovement: 'non' },
+        { id: 1, buildingId: 1, tabId: 'facade', label: "Caractéristiques constructives & matériaux", state: null, comment: "", photos: [] },
+        { id: 2, buildingId: 1, tabId: 'facade', label: "Ouvrages d’étanchéités", state: null, comment: "", photos: [] },
+        { id: 9, buildingId: 1, tabId: 'facade', label: "Etat d’entretien général", state: null, comment: "", photos: [], section: 'secondary', customColor: 'bg-gray-50 border-gray-200', thermalImprovement: 'non' },
+        { id: 10, buildingId: 1, tabId: 'facade', label: "Caractéristiques thermiques", state: null, comment: "", photos: [], section: 'secondary', customColor: 'bg-purple-50 border-purple-200' },
+        { id: 207, buildingId: 1, tabId: 'toiture', label: "Etat d’entretien général", state: null, comment: "", photos: [], section: 'secondary', customColor: 'bg-gray-50 border-gray-200', thermalImprovement: 'non' },
+        { id: 208, buildingId: 1, tabId: 'toiture', label: "Caractéristiques thermiques", state: null, comment: "", photos: [], section: 'secondary', customColor: 'bg-purple-50 border-purple-200' },
+        { id: 309, buildingId: 1, tabId: 'communs', label: "Etat d’entretien général", state: null, comment: "", photos: [], section: 'secondary', customColor: 'bg-gray-50 border-gray-200', thermalImprovement: 'non' },
+        { id: 310, buildingId: 1, tabId: 'communs', label: "Caractéristiques thermiques", state: null, comment: "", photos: [], section: 'secondary', customColor: 'bg-purple-50 border-purple-200' },
+    ]);
 
-    // Onglet COMMUNS
-    { id: 301, buildingId: 1, tabId: 'communs', label: "Caractéristiques constructives & matériaux", state: null, comment: "", photos: [] },
-    { id: 302, buildingId: 1, tabId: 'communs', label: "Caractéristiques des portes & accès", state: null, comment: "", photos: [] },
-    { id: 303, buildingId: 1, tabId: 'communs', label: "Présence matériaux à risques", state: null, comment: "", photos: [] },
-    { id: 304, buildingId: 1, tabId: 'communs', label: "Installations électriques & éclairage", state: null, comment: "", photos: [] },
-    { id: 305, buildingId: 1, tabId: 'communs', label: "Réseaux d’évacuation & d’adduction", state: null, comment: "", photos: [] },
-    { id: 306, buildingId: 1, tabId: 'communs', label: "Réseau gaz", state: null, comment: "", photos: [] },
-    { id: 307, buildingId: 1, tabId: 'communs', label: "Réglementation incendie", state: null, comment: "", photos: [] },
-    { id: 308, buildingId: 1, tabId: 'communs', label: "Les gestes d’usages à connaitre", state: null, comment: "", photos: [] },
-    { id: 309, buildingId: 1, tabId: 'communs', label: "Etat d’entretien général", state: null, comment: "", photos: [], section: 'secondary', customColor: 'bg-gray-50 border-gray-200', thermalImprovement: 'non' },
-    { id: 310, buildingId: 1, tabId: 'communs', label: "Caractéristiques thermiques", state: null, comment: "", photos: [], section: 'secondary', customColor: 'bg-purple-50 border-purple-200' },
+    const [works, setWorks] = useState([
+        { id: 1, buildingId: 1, tabId: 'facade', term: 'shortTerm', description: "Purge des éléments instables", price: "1500", thermalGain: "-", scenario: '0' },
+        { id: 2, buildingId: 1, tabId: 'structure', term: 'mediumTerm', description: "Reprise fissure pignon nord", price: "3200", thermalGain: "-", scenario: '0' },
+        { id: 3, buildingId: 1, tabId: 'toiture', term: 'longTerm', description: "Remplacement couverture zinc", price: "25000", thermalGain: "++", scenario: '0' }
+    ]);
 
-    // Onglet CAVES
-    { id: 401, buildingId: 1, tabId: 'caves', label: "Caractéristiques constructives & matériaux", state: null, comment: "", photos: [] },
-    { id: 402, buildingId: 1, tabId: 'caves', label: "Caractéristiques des portes & accès", state: null, comment: "", photos: [] },
-    { id: 403, buildingId: 1, tabId: 'caves', label: "Présence matériaux à risques", state: null, comment: "", photos: [] },
-    { id: 404, buildingId: 1, tabId: 'caves', label: "Installations électriques & éclairage", state: null, comment: "", photos: [] },
-    { id: 405, buildingId: 1, tabId: 'caves', label: "Réseaux d’évacuation & d’adduction", state: null, comment: "", photos: [] },
-    { id: 406, buildingId: 1, tabId: 'caves', label: "Réseau gaz", state: null, comment: "", photos: [] },
-    { id: 407, buildingId: 1, tabId: 'caves', label: "Réglementation incendie", state: null, comment: "", photos: [] },
-    { id: 408, buildingId: 1, tabId: 'caves', label: "Cloisonnement caves individuelles", state: null, comment: "", photos: [] },
-    { id: 409, buildingId: 1, tabId: 'caves', label: "Caractéristiques de la ventilation des locaux", state: null, comment: "", photos: [] },
-    { id: 410, buildingId: 1, tabId: 'caves', label: "Les gestes d’usages à connaitre", state: null, comment: "", photos: [] },
-    { id: 411, buildingId: 1, tabId: 'caves', label: "Etat d’entretien général", state: null, comment: "", photos: [], section: 'secondary', customColor: 'bg-gray-50 border-gray-200', thermalImprovement: 'non' },
-    { id: 412, buildingId: 1, tabId: 'caves', label: "Caractéristiques thermiques", state: null, comment: "", photos: [], section: 'secondary', customColor: 'bg-purple-50 border-purple-200' },
+    const [expandedItems, setExpandedItems] = useState({});
+    const [deleteModal, setDeleteModal] = useState({ show: false, type: null, id: null, term: null });
+    const [isGeneratingPDF, setIsGeneratingPDF] = useState(false);
+    const [photoModal, setPhotoModal] = useState({ show: false, itemId: null, photo: null, mode: 'annotate', scale: 1, offset: { x: 0, y: 0 } });
+    const editorImageRef = useRef(null);
+    const editorContainerRef = useRef(null);
+    const isDraggingRef = useRef(false);
+    const lastMousePosRef = useRef({ x: 0, y: 0 });
 
-    // Onglet STATIONNEMENT
-    { id: 501, buildingId: 1, tabId: 'stationnement', label: "Caractéristiques constructives & matériaux", state: null, comment: "", photos: [] },
-    { id: 502, buildingId: 1, tabId: 'stationnement', label: "Rampe d’accès véhicules, sorties piétons", state: null, comment: "", photos: [] },
-    { id: 503, buildingId: 1, tabId: 'stationnement', label: "Cloisonnement boxes individuelles", state: null, comment: "", photos: [] },
-    { id: 504, buildingId: 1, tabId: 'stationnement', label: "Installations électriques & éclairage", state: null, comment: "", photos: [] },
-    { id: 505, buildingId: 1, tabId: 'stationnement', label: "Caractéristiques de la ventilation des locaux", state: null, comment: "", photos: [] },
-    { id: 506, buildingId: 1, tabId: 'stationnement', label: "Réglementation incendie", state: null, comment: "", photos: [] },
-    { id: 507, buildingId: 1, tabId: 'stationnement', label: "Les gestes d’usages à connaitre", state: null, comment: "", photos: [] },
-    { id: 508, buildingId: 1, tabId: 'stationnement', label: "Etat d’entretien général", state: null, comment: "", photos: [], section: 'secondary', customColor: 'bg-gray-50 border-gray-200', thermalImprovement: 'non' },
-    { id: 509, buildingId: 1, tabId: 'stationnement', label: "Caractéristiques thermiques", state: null, comment: "", photos: [], section: 'secondary', customColor: 'bg-purple-50 border-purple-200' },
+    const states = [
+        { value: 'bon', label: 'Bon', color: 'bg-green-100 text-green-700 border-green-200', icon: CheckCircle2 },
+        { value: 'moyen', label: 'Moyen', color: 'bg-yellow-100 text-yellow-700 border-yellow-200', icon: AlertTriangle },
+        { value: 'mauvais', label: 'Mauvais', color: 'bg-red-100 text-red-700 border-red-200', icon: XCircle },
+        { value: 'nc', label: 'N/C', color: 'bg-gray-100 text-gray-700 border-gray-200', icon: HelpCircle },
+    ];
+    const thermalOptions = [{ value: "-", label: "-" }, { value: "+", label: "+" }, { value: "++", label: "++" }, { value: "+++", label: "+++" }];
+    const scenarioOptions = [{ value: '0', label: '—' }, ...Array.from({ length: 10 }, (_, i) => ({ value: String(i + 1), label: `Scénario ${i + 1}` }))];
+    const workSections = [
+        { key: 'shortTerm', title: 'Court Terme (0-3 ans)', icon: AlertTriangle, colorClass: 'text-red-700', bgClass: 'bg-red-50', borderClass: 'border-red-200' },
+        { key: 'mediumTerm', title: 'Moyen Terme (2-6 ans)', icon: Clock, colorClass: 'text-orange-700', bgClass: 'bg-orange-50', borderClass: 'border-orange-200' },
+        { key: 'longTerm', title: 'Long Terme (+6 ans)', icon: Calendar, colorClass: 'text-green-700', bgClass: 'bg-green-50', borderClass: 'border-green-200' },
+        { key: 'thermal', title: 'Amélioration Thermique', icon: ThermometerSun, colorClass: 'text-purple-700', bgClass: 'bg-purple-50', borderClass: 'border-purple-200' }
+    ];
 
-    // Onglet VENTILATION
-    { id: 601, buildingId: 1, tabId: 'ventilation', label: "Descriptif général", state: null, comment: "", photos: [] },
-    { id: 602, buildingId: 1, tabId: 'ventilation', label: "Matériaux & caractéristiques", state: null, comment: "", photos: [] },
-    { id: 603, buildingId: 1, tabId: 'ventilation', label: "Présence de chaudière gaz", state: null, comment: "", photos: [] },
-    { id: 604, buildingId: 1, tabId: 'ventilation', label: "Présence de conduits de fumées", state: null, comment: "", photos: [] },
-    { id: 605, buildingId: 1, tabId: 'ventilation', label: "Entrée d’air", state: null, comment: "", photos: [] },
-    { id: 606, buildingId: 1, tabId: 'ventilation', label: "Contrat d’entretien", state: null, comment: "", photos: [] },
-    { id: 607, buildingId: 1, tabId: 'ventilation', label: "Les gestes d’usages à connaitre", state: null, comment: "", photos: [] },
-    { id: 608, buildingId: 1, tabId: 'ventilation', label: "Etat d’entretien général", state: null, comment: "", photos: [], section: 'secondary', customColor: 'bg-gray-50 border-gray-200', thermalImprovement: 'non' },
-    { id: 609, buildingId: 1, tabId: 'ventilation', label: "Caractéristiques thermiques", state: null, comment: "", photos: [], section: 'secondary', customColor: 'bg-purple-50 border-purple-200' },
+    // --- LOGIQUE DE SAUVEGARDE ET CHARGEMENT FIRESTORE ---
 
-    // Onglet LOCAL POUBELLE
-    { id: 701, buildingId: 1, tabId: 'poubelle', label: "Matériaux & caractéristiques", state: null, comment: "", photos: [] },
-    { id: 702, buildingId: 1, tabId: 'poubelle', label: "Présence matériaux à risques", state: null, comment: "", photos: [] },
-    { id: 703, buildingId: 1, tabId: 'poubelle', label: "Réglementation incendie", state: null, comment: "", photos: [] },
-    { id: 704, buildingId: 1, tabId: 'poubelle', label: "Réglementation sanitaire", state: null, comment: "", photos: [] },
-    { id: 705, buildingId: 1, tabId: 'poubelle', label: "Etat d’entretien général", state: null, comment: "", photos: [], section: 'secondary', customColor: 'bg-gray-50 border-gray-200', thermalImprovement: 'non' },
-    { id: 706, buildingId: 1, tabId: 'poubelle', label: "Caractéristiques thermiques", state: null, comment: "", photos: [], section: 'secondary', customColor: 'bg-purple-50 border-purple-200' },
+    const getDocRef = useCallback((uid) => {
+        // Chemin de sauvegarde privé: /artifacts/{appId}/users/{userId}/data/audit
+        return doc(db, 'artifacts', appId, 'users', uid, 'data', 'audit');
+    }, []);
 
-    // Onglet EXTÉRIEUR
-    { id: 801, buildingId: 1, tabId: 'exterieur', label: "Matériaux & caractéristiques", state: null, comment: "", photos: [] },
-    { id: 802, buildingId: 1, tabId: 'exterieur', label: "Gestion des eaux pluviales", state: null, comment: "", photos: [] },
-    { id: 803, buildingId: 1, tabId: 'exterieur', label: "Etat d’entretien général", state: null, comment: "", photos: [], section: 'secondary', customColor: 'bg-gray-50 border-gray-200', thermalImprovement: 'non' },
-  ]);
+    const saveAudit = useCallback(async (dataToSave) => {
+        if (!db || !userId) return;
 
-  const [works, setWorks] = useState([
-    { id: 1, buildingId: 1, tabId: 'facade', term: 'shortTerm', description: "Purge des éléments instables", price: "1500", thermalGain: "-", scenario: '0' },
-    { id: 2, buildingId: 1, tabId: 'structure', term: 'mediumTerm', description: "Reprise fissure pignon nord", price: "3200", thermalGain: "-", scenario: '0' },
-    { id: 3, buildingId: 1, tabId: 'toiture', term: 'longTerm', description: "Remplacement couverture zinc", price: "25000", thermalGain: "++", scenario: '0' }
-  ]);
+        setIsSaving(true);
+        try {
+            await setDoc(getDocRef(userId), dataToSave, { merge: true });
+            console.log("Sauvegarde réussie pour l'utilisateur:", userId);
+        } catch (error) {
+            console.error("Erreur lors de la sauvegarde Firestore:", error);
+            // Afficher une alerte ou un message d'erreur si la sauvegarde échoue
+        } finally {
+            setIsSaving(false);
+        }
+    }, [getDocRef, userId, db]);
 
-  const [expandedItems, setExpandedItems] = useState({});
-  const [deleteModal, setDeleteModal] = useState({ show: false, type: null, id: null, term: null });
-  const [isGeneratingPDF, setIsGeneratingPDF] = useState(false);
-  const [photoModal, setPhotoModal] = useState({ show: false, itemId: null, photo: null, mode: 'annotate', scale: 1, offset: { x: 0, y: 0 } });
-  const editorImageRef = useRef(null);
-  const editorContainerRef = useRef(null);
-  const isDraggingRef = useRef(false);
-  const lastMousePosRef = useRef({ x: 0, y: 0 });
+    const loadAudit = useCallback(async (uid) => {
+        if (!db || !uid) return;
+        
+        try {
+            const docSnap = await getDoc(getDocRef(uid));
+            if (docSnap.exists()) {
+                const loadedData = docSnap.data();
+                
+                // Mettre à jour l'état React avec les données chargées
+                if (loadedData.buildings) setBuildings(loadedData.buildings);
+                if (loadedData.auditItems) setAuditItems(loadedData.auditItems);
+                if (loadedData.works) setWorks(loadedData.works);
+                if (loadedData.idData) setIdData(loadedData.idData);
+                if (loadedData.sectionData) setSectionData(loadedData.sectionData);
+                if (loadedData.activeBuildingId) setActiveBuildingId(loadedData.activeBuildingId);
 
-  const states = [
-    { value: 'bon', label: 'Bon', color: 'bg-green-100 text-green-700 border-green-200', icon: CheckCircle2 },
-    { value: 'moyen', label: 'Moyen', color: 'bg-yellow-100 text-yellow-700 border-yellow-200', icon: AlertTriangle },
-    { value: 'mauvais', label: 'Mauvais', color: 'bg-red-100 text-red-700 border-red-200', icon: XCircle },
-    { value: 'nc', label: 'N/C', color: 'bg-gray-100 text-gray-700 border-gray-200', icon: HelpCircle },
-  ];
-  const thermalOptions = [{ value: "-", label: "-" }, { value: "+", label: "+" }, { value: "++", label: "++" }, { value: "+++", label: "+++" }];
-  const scenarioOptions = [{ value: '0', label: '—' }, ...Array.from({ length: 10 }, (_, i) => ({ value: String(i + 1), label: `Scénario ${i + 1}` }))];
-  const workSections = [
-    { key: 'shortTerm', title: 'Court Terme (0-3 ans)', icon: AlertTriangle, colorClass: 'text-red-700', bgClass: 'bg-red-50', borderClass: 'border-red-200' },
-    { key: 'mediumTerm', title: 'Moyen Terme (2-6 ans)', icon: Clock, colorClass: 'text-orange-700', bgClass: 'bg-orange-50', borderClass: 'border-orange-200' },
-    { key: 'longTerm', title: 'Long Terme (+6 ans)', icon: Calendar, colorClass: 'text-green-700', bgClass: 'bg-green-50', borderClass: 'border-green-200' },
-    { key: 'thermal', title: 'Amélioration Thermique', icon: ThermometerSun, colorClass: 'text-purple-700', bgClass: 'bg-purple-50', borderClass: 'border-purple-200' }
-  ];
+                console.log("Données chargées avec succès.", loadedData);
+            }
+        } catch (error) {
+            console.error("Erreur lors du chargement Firestore:", error);
+        }
+    }, [getDocRef, db]);
+
+    // 1. Initialisation de l'authentification
+    useEffect(() => {
+        if (!auth) return;
+
+        const unsubscribe = onAuthStateChanged(auth, (user) => {
+            if (user) {
+                setUserId(user.uid);
+            } else {
+                // Si pas d'auth token, connexion anonyme
+                if (initialAuthToken) {
+                    // Si un jeton est fourni, essayez de vous connecter avec lui (cas Canvas)
+                    // Note: Le code du Canvas gère cela automatiquement
+                } else {
+                    // Sinon, connexion anonyme pour Firebase Hosting standard
+                    signInAnonymously(auth).then((result) => {
+                        setUserId(result.user.uid);
+                    }).catch((error) => {
+                        console.error("Erreur de connexion anonyme:", error);
+                        setUserId(crypto.randomUUID()); // Fallback non-Firebase userId
+                    });
+                }
+            }
+            setIsAuthReady(true);
+        });
+
+        return () => unsubscribe();
+    }, [auth]);
+
+    // 2. Chargement des données après authentification
+    useEffect(() => {
+        if (isAuthReady && userId && db) {
+            loadAudit(userId);
+        }
+    }, [isAuthReady, userId, db, loadAudit]);
+
+
+    // 3. Sauvegarde automatique (debounce)
+    useEffect(() => {
+        if (!userId || !isAuthReady || !db) return;
+
+        // Regrouper toutes les données dans un seul objet JSON
+        const dataToSave = {
+            buildings,
+            auditItems,
+            works,
+            idData,
+            sectionData,
+            activeBuildingId,
+            lastUpdated: new Date().toISOString(),
+        };
+
+        // Créer un délai (throttle) pour éviter une surcharge des écritures Firestore
+        const handler = setTimeout(() => {
+            saveAudit(dataToSave);
+        }, 3000); // Sauvegarde 3 secondes après la dernière modification
+
+        // Nettoyage : annuler la sauvegarde si l'état change avant l'expiration du délai
+        return () => {
+            clearTimeout(handler);
+        };
+    }, [buildings, auditItems, works, idData, sectionData, activeBuildingId, userId, isAuthReady, db, saveAudit]);
+
 
   // --- PDF GENERATOR UTILS ---
   const loadScript = (src) => { return new Promise((resolve, reject) => { if (document.querySelector(`script[src="${src}"]`)) { resolve(); return; } const script = document.createElement('script'); script.src = src; script.onload = resolve; script.onerror = reject; document.head.appendChild(script); }); };
@@ -404,7 +513,6 @@ const AuditFacade = () => {
   
   // --- ACTIONS ID DATA ---
   const updateIdData = (field, value) => setIdData(prev => ({ ...prev, [field]: value }));
-  // NOUVELLE FONCTION pour mettre à jour la valeur d'un risque
   const updateRiskValue = (riskKey, value) => setIdData(prev => ({ ...prev, risks: { ...prev.risks, [riskKey]: value } }));
   const handleIdPhotoUpload = async (field, event) => { const files = event.target.files; if (files && files[0]) { const url = await resizeImage(files[0]); setIdData(prev => ({ ...prev, [field]: url })); } };
 
@@ -414,7 +522,9 @@ const AuditFacade = () => {
   const handleEditorMouseMove = (e) => { if (isDraggingRef.current && photoModal.mode === 'crop') { const deltaX = e.clientX - lastMousePosRef.current.x; const deltaY = e.clientY - lastMousePosRef.current.y; lastMousePosRef.current = { x: e.clientX, y: e.clientY }; setPhotoModal(prev => ({ ...prev, offset: { x: prev.offset.x + deltaX, y: prev.offset.y + deltaY } })); } };
   const handleEditorMouseUp = () => { isDraggingRef.current = false; };
   const handleImageClick = (e) => { if (photoModal.mode !== 'annotate') return; const rect = e.currentTarget.getBoundingClientRect(); const x = ((e.clientX - rect.left) / rect.width) * 100; const y = ((e.clientY - rect.top) / rect.height) * 100; setPhotoModal(prev => ({ ...prev, photo: { ...prev.photo, markers: [...prev.photo.markers, { id: Date.now(), x, y }] } })); };
-  const applyCrop = () => { if (!editorImageRef.current) return; const canvas = document.createElement('canvas'); const ctx = canvas.getContext('2d'); const img = editorImageRef.current; const containerRect = editorContainerRef.current.getBoundingClientRect(); const width = containerRect.width; const height = containerRect.height; canvas.width = width; canvas.height = height; ctx.fillStyle = "#000"; ctx.fillRect(0, 0, width, height); ctx.save(); ctx.translate(width/2, height/2); ctx.translate(photoModal.offset.x, photoModal.offset.y); ctx.scale(photoModal.scale, photoModal.scale); const ratio = Math.min(width / img.naturalWidth, height / img.naturalHeight); const drawW = img.naturalWidth * ratio; const drawH = img.naturalHeight * ratio; ctx.drawImage(img, -drawW/2, -drawH/2, drawW, drawH); ctx.restore(); const newUrl = canvas.toDataURL('image/jpeg', 0.9); setPhotoModal(prev => ({ ...prev, photo: { ...prev.photo, url: newUrl, markers: [] }, mode: 'annotate', scale: 1, offset: { x: 0, y: 0 } })); };
+  const applyCrop = () => { if (!editorImageRef.current) return; const canvas = document.createElement('canvas'); const ctx = canvas.getContext('2d'); const img = editorImageRef.current; const containerRect = editorContainerRef.current.getBoundingClientRect(); const width = containerRect.width; const height = containerRect.height; canvas.width = width; canvas.height = height; ctx.fillStyle = "#000"; ctx.fillRect(0, 0, width, height); ctx.save(); ctx.translate(width/2, height/2); ctx.translate(photoModal.offset.x, photoModal.offset.y); ctx.scale(photoModal.scale, photoModal.scale); const ratio = Math.min(width / img.naturalWidth, height / img.naturalHeight); const drawW = img.naturalWidth * ratio; const drawH = img.naturalHeight * ratio; ctx.drawImage(img, -drawW/2, -drawH/2, drawW, drawH); ctx.restore(); const newUrl = canvas.toDataURL('image/jpeg', 0.9); setPhotoModal(prev => ({ ...prev, photo: { ...prev.photo, url: newUrl, markers: [] }, mode: 'annotate', scale: 1, offset: { x: 0, y: 0 } }
+    )); 
+  };
   const savePhotoEdits = () => { setAuditItems(prev => prev.map(item => item.id === photoModal.itemId ? { ...item, photos: item.photos.map(p => p.id === photoModal.photo.id ? photoModal.photo : p) } : item)); setPhotoModal({ show: false, itemId: null, photo: null, mode: 'annotate', scale: 1, offset: {x:0, y:0} }); };
 
   const handleGeneratePDF = async () => {
@@ -490,31 +600,46 @@ const AuditFacade = () => {
             doc.setTextColor(stateColor[0], stateColor[1], stateColor[2]); doc.text(stateText, 170, yPos, { align: 'right' }); yPos += 7;
             doc.setFont(undefined, 'normal'); doc.setFontSize(10);
             const rawComment = item.comment || "Aucune observation.";
-            const cleanComment = rawComment.replace(/<[^/>][^>]*><\/[^>]+>/g, "");
-            const parts = cleanComment.split(/(<\/?(?:b|font)[^>]*>)/gi);
+            
+            const parts = rawComment.split(/(<\/?(?:b|strong|font)[^>]*>)/gi).filter(p => p.trim() !== '');
             let currentX = 15; const maxWidth = 180; const lineHeight = 5; let isBold = false; let isRed = false; let isPurple = false;
+            
             for (const part of parts) {
-                if (!part) continue;
-                if (part.toLowerCase() === '<b>' || part.toLowerCase() === '<strong>') { isBold = true; continue; }
-                if (part.toLowerCase() === '</b>' || part.toLowerCase() === '</strong>') { isBold = false; continue; }
+                if (part.toLowerCase().includes('<b') || part.toLowerCase().includes('<strong')) { isBold = true; continue; }
+                if (part.toLowerCase().includes('</b') || part.toLowerCase().includes('</strong')) { isBold = false; continue; }
                 if (part.toLowerCase().includes('color="#ef4444"')) { isRed = true; isPurple = false; continue; }
                 if (part.toLowerCase().includes('color="#9333ea"')) { isPurple = true; isRed = false; continue; }
                 if (part.toLowerCase() === '</font>') { isRed = false; isPurple = false; continue; }
                 if (part.startsWith('<') && part.endsWith('>')) continue;
+
                 doc.setFont(undefined, isBold ? 'bold' : 'normal');
                 if (isRed) doc.setTextColor(239, 68, 68);
                 else if (isPurple) doc.setTextColor(147, 51, 234);
                 else doc.setTextColor(60, 60, 60);
-                const words = part.split(/(\s+)/);
-                for (const word of words) {
-                    const wordWidth = doc.getStringUnitWidth(word) * doc.internal.getFontSize() / doc.internal.scaleFactor;
-                    if (currentX + wordWidth > 15 + maxWidth) { yPos += lineHeight; currentX = 15; if (yPos > 270) { doc.addPage(); yPos = 20; } }
-                    const decodedWord = word.replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>');
-                    doc.text(decodedWord, currentX, yPos);
-                    currentX += wordWidth;
+
+                const textSegment = part.replace(/<br\s*\/?>/gi, '\n').replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>');
+                const lines = textSegment.split('\n');
+
+                for (let line of lines) {
+                    const words = line.split(/(\s+)/).filter(w => w !== '');
+                    for (const word of words) {
+                        const wordWidth = doc.getStringUnitWidth(word) * doc.internal.getFontSize() / doc.internal.scaleFactor;
+                        if (currentX + wordWidth > 15 + maxWidth) { yPos += lineHeight; currentX = 15; if (yPos > 270) { doc.addPage(); yPos = 20; } }
+                        
+                        doc.text(word, currentX, yPos);
+                        currentX += wordWidth;
+                    }
+                    if (lines.length > 1 && lines.indexOf(line) < lines.length - 1) {
+                         yPos += lineHeight;
+                         currentX = 15;
+                         if (yPos > 270) { doc.addPage(); yPos = 20; }
+                    }
                 }
+                
+                if (lines.length === 1 && currentX > 15) {} else { yPos += 5; } // Ajustement de la position après le segment
             }
-            yPos += lineHeight + 5;
+            if (currentX > 15) { yPos += lineHeight + 5; } else { yPos += 5; } // Ajustement final
+
             if (item.photos && item.photos.length > 0) {
                let xPhoto = 15; const photoH = 40; const photoW = 40; if (yPos + photoH > 270) { doc.addPage(); yPos = 20; }
                for (const photo of item.photos) {
@@ -547,7 +672,6 @@ const AuditFacade = () => {
         { key: 'soilPollution', label: 'Pollution des sols', icon: Skull },
     ];
 
-    // NOUVELLE liste des options pour les géorisques
     const riskOptions = [
         { value: 'inconnu', label: 'Inconnu', color: 'text-slate-500 bg-slate-100' },
         { value: 'non_concerne', label: 'Non concerné', color: 'text-slate-500 bg-slate-100' },
@@ -559,7 +683,6 @@ const AuditFacade = () => {
         { value: 'important', label: 'Important', color: 'text-red-700 bg-red-100' },
     ];
 
-    // Helper pour récupérer la couleur associée à la valeur sélectionnée
     const getRiskStyle = (value) => {
         const opt = riskOptions.find(o => o.value === value);
         return opt ? opt.color : 'text-slate-500 bg-slate-50';
@@ -764,8 +887,8 @@ const AuditFacade = () => {
           const sectionTotal = calculateTotal(termWorks);
           return (
             <div key={section.key} className={`border rounded-xl overflow-hidden shadow-sm bg-white`}>
-              <div className={`p-4 ${section.bgClass} border-b ${section.borderClass} flex justify-between items-center`}>
-                <div className={`flex items-center gap-2 font-bold text-lg ${section.colorClass}`}><section.icon size={20} />{section.title}</div>
+              <div className={`p-4 ${section.bgClass} border-b ${section.borderClass} flex justify-between items-center bg-white/50`}>
+                <div className={`flex items-center gap-2 ${section.colorClass} font-bold uppercase tracking-wider text-sm`}><section.icon size={20} />{section.title}</div>
                 <div className="font-bold bg-white px-3 py-1 rounded border shadow-sm">{sectionTotal.toLocaleString()} €</div>
               </div>
               <div className="p-0">
@@ -977,7 +1100,12 @@ const AuditFacade = () => {
         <div className="bg-slate-900 text-white p-6 pb-0 relative">
             <div className="flex items-center justify-between">
               <h1 className="text-2xl font-bold flex items-center gap-2 mb-4"><Building className="h-6 w-6 text-blue-400" /> Audit Architectural</h1>
-              <div className="absolute top-4 right-4 z-10">
+              <div className="absolute top-4 right-4 z-10 flex items-center gap-4">
+                  {isSaving ? (
+                      <span className="flex items-center text-xs font-bold text-slate-400"><Loader2 size={12} className="animate-spin mr-1" />Sauvegarde auto...</span>
+                  ) : (
+                       <span className="flex items-center text-xs font-bold text-green-400"><Check size={12} className="mr-1" />Sauvegardé</span>
+                  )}
                 <button onClick={handleGeneratePDF} disabled={isGeneratingPDF} className={`flex items-center gap-2 px-4 py-2 rounded-lg shadow-lg transition-colors text-sm font-medium ${isGeneratingPDF ? 'bg-slate-400 cursor-wait' : 'bg-blue-600 hover:bg-blue-700'} text-white`}>
                   {isGeneratingPDF ? <Loader2 size={16} className="animate-spin" /> : <FileText size={16} />}
                   {isGeneratingPDF ? 'Génération...' : 'Générer le Rapport PDF'}
