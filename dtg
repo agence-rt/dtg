@@ -1,0 +1,1136 @@
+import React, { useState, useEffect, useRef } from 'react';
+import { 
+  Building, 
+  CheckCircle2, 
+  AlertTriangle, 
+  XCircle, 
+  HelpCircle, 
+  ChevronDown, 
+  ChevronUp, 
+  ChevronLeft, 
+  ChevronRight, 
+  Save, 
+  ClipboardList, 
+  Hammer, 
+  Clock, 
+  Calendar, 
+  ArrowRight, 
+  Plus, 
+  Trash2, 
+  Euro, 
+  ThermometerSun, 
+  Download, 
+  LayoutDashboard, 
+  Home, 
+  Edit2, 
+  Camera, 
+  Image as ImageIcon, 
+  X, 
+  Maximize2, 
+  Undo2, 
+  MousePointer2, 
+  FolderPlus, 
+  Folder, 
+  PieChart, 
+  Star, 
+  Copy, 
+  Calculator, 
+  FileText, 
+  Crop, 
+  ZoomIn, 
+  Move, 
+  ArrowUp, 
+  ArrowDown, 
+  Bold, 
+  Paintbrush, 
+  Sparkles, 
+  Loader2,
+  Check,
+  Leaf,
+  Waves,
+  Droplets,
+  Activity,
+  Mountain,
+  Minimize2,
+  Wind,
+  Factory,
+  Zap,
+  Truck,
+  Skull,
+  MapPin,
+  FileSpreadsheet
+} from 'lucide-react';
+
+// --- COMPOSANT ÉDITEUR RICHE AVEC GEMINI ---
+const RichTextEditor = ({ value, onChange, placeholder, itemId }) => {
+    const editorRef = useRef(null);
+    const [isReformulating, setIsReformulating] = useState(false);
+    const apiKey = ""; 
+
+    useEffect(() => {
+        if (editorRef.current) {
+            if (editorRef.current.innerHTML !== (value || "")) {
+                editorRef.current.innerHTML = value || "";
+            }
+        }
+    }, [value, itemId]); 
+
+    const handleInput = (e) => {
+        onChange(e.currentTarget.innerHTML);
+    };
+
+    const execCmd = (command, value = null) => {
+        document.execCommand(command, false, value);
+        if (editorRef.current) {
+            onChange(editorRef.current.innerHTML);
+            editorRef.current.focus();
+        }
+    };
+
+    const handleReformulate = async () => {
+        const textToRefine = editorRef.current.innerText;
+        if (!textToRefine || textToRefine.trim().length < 5) return;
+
+        setIsReformulating(true);
+        try {
+            const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    contents: [{ 
+                        parts: [{ 
+                            text: `Tu es un expert en bâtiment. Reformule le constat d'audit suivant de manière technique, précise et professionnelle (ton neutre, vocabulaire du bâtiment). Conserve le sens original. Texte : "${textToRefine}"` 
+                        }] 
+                    }]
+                })
+            });
+            
+            const data = await response.json();
+            const reformulatedText = data.candidates?.[0]?.content?.parts?.[0]?.text;
+
+            if (reformulatedText) {
+                if (editorRef.current) {
+                    editorRef.current.innerHTML = reformulatedText;
+                    onChange(reformulatedText); 
+                }
+            }
+        } catch (error) {
+            console.error("Erreur Gemini:", error);
+            alert("Impossible de reformuler le texte pour le moment.");
+        } finally {
+            setIsReformulating(false);
+        }
+    };
+
+    return (
+        <div className="border border-slate-300 rounded-md focus-within:ring-2 focus-within:ring-blue-500 bg-white/80 overflow-hidden transition-all relative">
+            <div className="flex items-center justify-between p-2 border-b border-slate-200 bg-slate-50/50">
+                <div className="flex gap-1">
+                    <button onClick={() => execCmd('bold')} className="p-1.5 rounded hover:bg-slate-200 text-slate-700 transition-colors" title="Gras"><Bold size={14} /></button>
+                    <button onClick={() => execCmd('foreColor', '#ef4444')} className="p-1.5 rounded hover:bg-slate-200 text-red-600 transition-colors" title="Rouge (Urgence)"><Paintbrush size={14} /></button>
+                    <button onClick={() => execCmd('foreColor', '#9333ea')} className="p-1.5 rounded hover:bg-slate-200 text-purple-600 transition-colors" title="Violet (Important)"><Paintbrush size={14} /></button>
+                    <button onClick={() => execCmd('foreColor', '#000000')} className="p-1.5 rounded hover:bg-slate-200 text-black font-bold text-xs w-7 h-7 flex items-center justify-center" title="Couleur par défaut">Tx</button>
+                </div>
+                <button onClick={handleReformulate} disabled={isReformulating} className={`flex items-center gap-1.5 px-2 py-1 rounded text-xs font-medium transition-all ${isReformulating ? 'bg-purple-100 text-purple-400' : 'bg-purple-100 text-purple-700 hover:bg-purple-200'}`} title="Reformuler avec l'IA">
+                    {isReformulating ? <Loader2 size={12} className="animate-spin" /> : <Sparkles size={12} />}
+                    {isReformulating ? 'Génération...' : 'Reformuler'}
+                </button>
+            </div>
+            <div ref={editorRef} contentEditable onInput={handleInput} className="w-full p-3 text-sm outline-none min-h-[80px] max-h-[200px] overflow-y-auto cursor-text text-slate-700" style={{ whiteSpace: 'pre-wrap' }} />
+            {!value && <div className="absolute top-[50px] left-4 text-slate-400 text-sm pointer-events-none">{placeholder}</div>}
+        </div>
+    );
+};
+
+// --- COMPOSANT SCENARIO ---
+const MultiSelectScenario = ({ work, onChange, options }) => {
+    const [isOpen, setIsOpen] = useState(false);
+    const containerRef = useRef(null);
+    
+    const selected = work.scenario ? work.scenario.split(',').filter(s => s !== '0' && s !== '') : [];
+
+    const toggleScenario = (value) => {
+        let newSelection = [...selected];
+        if (newSelection.includes(value)) {
+            newSelection = newSelection.filter(s => s !== value);
+        } else {
+            newSelection.push(value);
+        }
+        const finalValue = newSelection.length > 0 ? newSelection.sort((a,b) => parseInt(a)-parseInt(b)).join(',') : '0';
+        onChange(work.id, 'scenario', finalValue);
+    };
+
+    useEffect(() => {
+        const handleClickOutside = (event) => {
+            if (containerRef.current && !containerRef.current.contains(event.target)) {
+                setIsOpen(false);
+            }
+        };
+        if (isOpen) document.addEventListener("mousedown", handleClickOutside);
+        return () => document.removeEventListener("mousedown", handleClickOutside);
+    }, [isOpen]);
+
+    const displayScenarios = selected.length > 0 ? selected.map(s => `S${s}`).join(', ') : '—';
+
+    return (
+        <div className="relative w-full" ref={containerRef}>
+            <button 
+                onClick={() => setIsOpen(!isOpen)}
+                className={`w-full h-8 px-2 text-sm border rounded flex items-center justify-between transition-colors ${selected.length > 0 ? 'bg-purple-50 border-purple-200 text-purple-700 font-bold' : 'bg-white border-transparent hover:border-slate-300 text-slate-500'}`}
+            >
+                <span className="truncate">{displayScenarios}</span>
+                <ChevronDown size={12} className={`ml-1 transition-transform ${isOpen ? 'rotate-180' : ''}`} />
+            </button>
+
+            {isOpen && (
+                <div className="absolute top-full left-0 mt-1 w-48 bg-white border border-slate-200 rounded-lg shadow-xl z-50 p-2 grid grid-cols-2 gap-1 animate-in fade-in zoom-in-95 duration-100">
+                    {options.filter(o => o.value !== '0').map(opt => {
+                        const isSelected = selected.includes(opt.value);
+                        return (
+                            <button
+                                key={opt.value}
+                                onClick={() => toggleScenario(opt.value)}
+                                className={`flex items-center justify-center gap-1 px-2 py-1.5 rounded text-xs font-medium transition-colors ${isSelected ? 'bg-purple-600 text-white shadow-sm' : 'bg-slate-50 text-slate-600 hover:bg-slate-100'}`}
+                            >
+                                {isSelected && <Check size={10} />}
+                                {opt.label}
+                            </button>
+                        );
+                    })}
+                </div>
+            )}
+        </div>
+    );
+};
+
+const AuditFacade = () => {
+  const [viewMode, setViewMode] = useState('building'); 
+  const [buildings, setBuildings] = useState([{ id: 1, name: "Bâtiment A" }]);
+  const [activeBuildingId, setActiveBuildingId] = useState(1);
+  const [tabs, setTabs] = useState([
+    { id: 'structure', name: 'Structure' },
+    { id: 'facade', name: 'Façade' },
+    { id: 'toiture', name: 'Toiture' },
+    { id: 'communs', name: 'Communs' }, 
+    { id: 'caves', name: 'Caves' }, 
+    { id: 'stationnement', name: 'Stationnement' },
+    { id: 'ventilation', name: 'Ventilation' }, 
+    { id: 'poubelle', name: 'Local poubelle' },
+    { id: 'exterieur', name: 'Extérieur' },
+  ]);
+  const [activeTabId, setActiveTabId] = useState('structure');
+  const [editingId, setEditingId] = useState(null); 
+  const [editingType, setEditingType] = useState(null); 
+  const [tempName, setTempName] = useState("");
+  const [sectionData, setSectionData] = useState({}); 
+
+  // --- DONNEES IDENTIFICATION ---
+  const [idData, setIdData] = useState({
+    address: "", cadastreRef: "", cadastrePhoto: null, coproPhoto: null,
+    registration: "", siret: "", typology: "", hasElevator: false,
+    buildingCount: "", lotCount: "", constructionPeriod: "", hasUndergroundParking: false,
+    // Modification: valeurs par défaut à 'inconnu' pour les menus déroulants
+    risks: { 
+        flood: 'inconnu', 
+        waterTable: 'inconnu', 
+        seism: 'inconnu', 
+        groundMovement: 'inconnu', 
+        clay: 'inconnu', 
+        radon: 'inconnu', 
+        industrial: 'inconnu', 
+        nuclear: 'inconnu', 
+        dangerousMaterial: 'inconnu', 
+        soilPollution: 'inconnu' 
+    }
+  });
+
+  const [auditItems, setAuditItems] = useState([
+    // Onglet STRUCTURE
+    { id: 101, buildingId: 1, tabId: 'structure', label: "Descriptif général", state: null, comment: "", photos: [] },
+    { id: 102, buildingId: 1, tabId: 'structure', label: "Caractéristiques constructives & matériaux", state: null, comment: "", photos: [] },
+    { id: 103, buildingId: 1, tabId: 'structure', label: "Etat d’entretien général et désordres", state: null, comment: "", photos: [], section: 'secondary', customColor: 'bg-gray-50 border-gray-200', thermalImprovement: 'non' },
+
+    // Onglet FACADE
+    { id: 1, buildingId: 1, tabId: 'facade', label: "Caractéristiques constructives & matériaux", state: null, comment: "", photos: [] },
+    { id: 2, buildingId: 1, tabId: 'facade', label: "Ouvrages d’étanchéités", state: null, comment: "", photos: [] },
+    { id: 3, buildingId: 1, tabId: 'facade', label: "Ferronneries", state: null, comment: "", photos: [] },
+    { id: 4, buildingId: 1, tabId: 'facade', label: "Menuiseries", state: null, comment: "", photos: [] },
+    { id: 5, buildingId: 1, tabId: 'facade', label: "Eaux pluviales – Eaux usées", state: null, comment: "", photos: [] },
+    { id: 6, buildingId: 1, tabId: 'facade', label: "Balcon", state: null, comment: "", photos: [] },
+    { id: 7, buildingId: 1, tabId: 'facade', label: "Contrainte de mitoyenneté", state: null, comment: "", photos: [] },
+    { id: 8, buildingId: 1, tabId: 'facade', label: "Les gestes d’usages à connaitre", state: null, comment: "", photos: [] },
+    { id: 9, buildingId: 1, tabId: 'facade', label: "Etat d’entretien général", state: null, comment: "", photos: [], section: 'secondary', customColor: 'bg-gray-50 border-gray-200', thermalImprovement: 'non' },
+    { id: 10, buildingId: 1, tabId: 'facade', label: "Caractéristiques thermiques", state: null, comment: "", photos: [], section: 'secondary', customColor: 'bg-purple-50 border-purple-200' },
+    
+    // Onglet TOITURE
+    { id: 201, buildingId: 1, tabId: 'toiture', label: "Accès", state: null, comment: "", photos: [] },
+    { id: 202, buildingId: 1, tabId: 'toiture', label: "Charpente & combles", state: null, comment: "", photos: [] },
+    { id: 203, buildingId: 1, tabId: 'toiture', label: "Ouvrages en toiture", state: null, comment: "", photos: [] },
+    { id: 204, buildingId: 1, tabId: 'toiture', label: "Gestion des eaux pluviales", state: null, comment: "", photos: [] },
+    { id: 205, buildingId: 1, tabId: 'toiture', label: "Contrats d’entretiens", state: null, comment: "", photos: [] },
+    { id: 206, buildingId: 1, tabId: 'toiture', label: "Ferronneries", state: null, comment: "", photos: [] },
+    { id: 207, buildingId: 1, tabId: 'toiture', label: "Etat d’entretien général", state: null, comment: "", photos: [], section: 'secondary', customColor: 'bg-gray-50 border-gray-200', thermalImprovement: 'non' },
+    { id: 208, buildingId: 1, tabId: 'toiture', label: "Caractéristiques thermiques", state: null, comment: "", photos: [], section: 'secondary', customColor: 'bg-purple-50 border-purple-200' },
+
+    // Onglet COMMUNS
+    { id: 301, buildingId: 1, tabId: 'communs', label: "Caractéristiques constructives & matériaux", state: null, comment: "", photos: [] },
+    { id: 302, buildingId: 1, tabId: 'communs', label: "Caractéristiques des portes & accès", state: null, comment: "", photos: [] },
+    { id: 303, buildingId: 1, tabId: 'communs', label: "Présence matériaux à risques", state: null, comment: "", photos: [] },
+    { id: 304, buildingId: 1, tabId: 'communs', label: "Installations électriques & éclairage", state: null, comment: "", photos: [] },
+    { id: 305, buildingId: 1, tabId: 'communs', label: "Réseaux d’évacuation & d’adduction", state: null, comment: "", photos: [] },
+    { id: 306, buildingId: 1, tabId: 'communs', label: "Réseau gaz", state: null, comment: "", photos: [] },
+    { id: 307, buildingId: 1, tabId: 'communs', label: "Réglementation incendie", state: null, comment: "", photos: [] },
+    { id: 308, buildingId: 1, tabId: 'communs', label: "Les gestes d’usages à connaitre", state: null, comment: "", photos: [] },
+    { id: 309, buildingId: 1, tabId: 'communs', label: "Etat d’entretien général", state: null, comment: "", photos: [], section: 'secondary', customColor: 'bg-gray-50 border-gray-200', thermalImprovement: 'non' },
+    { id: 310, buildingId: 1, tabId: 'communs', label: "Caractéristiques thermiques", state: null, comment: "", photos: [], section: 'secondary', customColor: 'bg-purple-50 border-purple-200' },
+
+    // Onglet CAVES
+    { id: 401, buildingId: 1, tabId: 'caves', label: "Caractéristiques constructives & matériaux", state: null, comment: "", photos: [] },
+    { id: 402, buildingId: 1, tabId: 'caves', label: "Caractéristiques des portes & accès", state: null, comment: "", photos: [] },
+    { id: 403, buildingId: 1, tabId: 'caves', label: "Présence matériaux à risques", state: null, comment: "", photos: [] },
+    { id: 404, buildingId: 1, tabId: 'caves', label: "Installations électriques & éclairage", state: null, comment: "", photos: [] },
+    { id: 405, buildingId: 1, tabId: 'caves', label: "Réseaux d’évacuation & d’adduction", state: null, comment: "", photos: [] },
+    { id: 406, buildingId: 1, tabId: 'caves', label: "Réseau gaz", state: null, comment: "", photos: [] },
+    { id: 407, buildingId: 1, tabId: 'caves', label: "Réglementation incendie", state: null, comment: "", photos: [] },
+    { id: 408, buildingId: 1, tabId: 'caves', label: "Cloisonnement caves individuelles", state: null, comment: "", photos: [] },
+    { id: 409, buildingId: 1, tabId: 'caves', label: "Caractéristiques de la ventilation des locaux", state: null, comment: "", photos: [] },
+    { id: 410, buildingId: 1, tabId: 'caves', label: "Les gestes d’usages à connaitre", state: null, comment: "", photos: [] },
+    { id: 411, buildingId: 1, tabId: 'caves', label: "Etat d’entretien général", state: null, comment: "", photos: [], section: 'secondary', customColor: 'bg-gray-50 border-gray-200', thermalImprovement: 'non' },
+    { id: 412, buildingId: 1, tabId: 'caves', label: "Caractéristiques thermiques", state: null, comment: "", photos: [], section: 'secondary', customColor: 'bg-purple-50 border-purple-200' },
+
+    // Onglet STATIONNEMENT
+    { id: 501, buildingId: 1, tabId: 'stationnement', label: "Caractéristiques constructives & matériaux", state: null, comment: "", photos: [] },
+    { id: 502, buildingId: 1, tabId: 'stationnement', label: "Rampe d’accès véhicules, sorties piétons", state: null, comment: "", photos: [] },
+    { id: 503, buildingId: 1, tabId: 'stationnement', label: "Cloisonnement boxes individuelles", state: null, comment: "", photos: [] },
+    { id: 504, buildingId: 1, tabId: 'stationnement', label: "Installations électriques & éclairage", state: null, comment: "", photos: [] },
+    { id: 505, buildingId: 1, tabId: 'stationnement', label: "Caractéristiques de la ventilation des locaux", state: null, comment: "", photos: [] },
+    { id: 506, buildingId: 1, tabId: 'stationnement', label: "Réglementation incendie", state: null, comment: "", photos: [] },
+    { id: 507, buildingId: 1, tabId: 'stationnement', label: "Les gestes d’usages à connaitre", state: null, comment: "", photos: [] },
+    { id: 508, buildingId: 1, tabId: 'stationnement', label: "Etat d’entretien général", state: null, comment: "", photos: [], section: 'secondary', customColor: 'bg-gray-50 border-gray-200', thermalImprovement: 'non' },
+    { id: 509, buildingId: 1, tabId: 'stationnement', label: "Caractéristiques thermiques", state: null, comment: "", photos: [], section: 'secondary', customColor: 'bg-purple-50 border-purple-200' },
+
+    // Onglet VENTILATION
+    { id: 601, buildingId: 1, tabId: 'ventilation', label: "Descriptif général", state: null, comment: "", photos: [] },
+    { id: 602, buildingId: 1, tabId: 'ventilation', label: "Matériaux & caractéristiques", state: null, comment: "", photos: [] },
+    { id: 603, buildingId: 1, tabId: 'ventilation', label: "Présence de chaudière gaz", state: null, comment: "", photos: [] },
+    { id: 604, buildingId: 1, tabId: 'ventilation', label: "Présence de conduits de fumées", state: null, comment: "", photos: [] },
+    { id: 605, buildingId: 1, tabId: 'ventilation', label: "Entrée d’air", state: null, comment: "", photos: [] },
+    { id: 606, buildingId: 1, tabId: 'ventilation', label: "Contrat d’entretien", state: null, comment: "", photos: [] },
+    { id: 607, buildingId: 1, tabId: 'ventilation', label: "Les gestes d’usages à connaitre", state: null, comment: "", photos: [] },
+    { id: 608, buildingId: 1, tabId: 'ventilation', label: "Etat d’entretien général", state: null, comment: "", photos: [], section: 'secondary', customColor: 'bg-gray-50 border-gray-200', thermalImprovement: 'non' },
+    { id: 609, buildingId: 1, tabId: 'ventilation', label: "Caractéristiques thermiques", state: null, comment: "", photos: [], section: 'secondary', customColor: 'bg-purple-50 border-purple-200' },
+
+    // Onglet LOCAL POUBELLE
+    { id: 701, buildingId: 1, tabId: 'poubelle', label: "Matériaux & caractéristiques", state: null, comment: "", photos: [] },
+    { id: 702, buildingId: 1, tabId: 'poubelle', label: "Présence matériaux à risques", state: null, comment: "", photos: [] },
+    { id: 703, buildingId: 1, tabId: 'poubelle', label: "Réglementation incendie", state: null, comment: "", photos: [] },
+    { id: 704, buildingId: 1, tabId: 'poubelle', label: "Réglementation sanitaire", state: null, comment: "", photos: [] },
+    { id: 705, buildingId: 1, tabId: 'poubelle', label: "Etat d’entretien général", state: null, comment: "", photos: [], section: 'secondary', customColor: 'bg-gray-50 border-gray-200', thermalImprovement: 'non' },
+    { id: 706, buildingId: 1, tabId: 'poubelle', label: "Caractéristiques thermiques", state: null, comment: "", photos: [], section: 'secondary', customColor: 'bg-purple-50 border-purple-200' },
+
+    // Onglet EXTÉRIEUR
+    { id: 801, buildingId: 1, tabId: 'exterieur', label: "Matériaux & caractéristiques", state: null, comment: "", photos: [] },
+    { id: 802, buildingId: 1, tabId: 'exterieur', label: "Gestion des eaux pluviales", state: null, comment: "", photos: [] },
+    { id: 803, buildingId: 1, tabId: 'exterieur', label: "Etat d’entretien général", state: null, comment: "", photos: [], section: 'secondary', customColor: 'bg-gray-50 border-gray-200', thermalImprovement: 'non' },
+  ]);
+
+  const [works, setWorks] = useState([
+    { id: 1, buildingId: 1, tabId: 'facade', term: 'shortTerm', description: "Purge des éléments instables", price: "1500", thermalGain: "-", scenario: '0' },
+    { id: 2, buildingId: 1, tabId: 'structure', term: 'mediumTerm', description: "Reprise fissure pignon nord", price: "3200", thermalGain: "-", scenario: '0' },
+    { id: 3, buildingId: 1, tabId: 'toiture', term: 'longTerm', description: "Remplacement couverture zinc", price: "25000", thermalGain: "++", scenario: '0' }
+  ]);
+
+  const [expandedItems, setExpandedItems] = useState({});
+  const [deleteModal, setDeleteModal] = useState({ show: false, type: null, id: null, term: null });
+  const [isGeneratingPDF, setIsGeneratingPDF] = useState(false);
+  const [photoModal, setPhotoModal] = useState({ show: false, itemId: null, photo: null, mode: 'annotate', scale: 1, offset: { x: 0, y: 0 } });
+  const editorImageRef = useRef(null);
+  const editorContainerRef = useRef(null);
+  const isDraggingRef = useRef(false);
+  const lastMousePosRef = useRef({ x: 0, y: 0 });
+
+  const states = [
+    { value: 'bon', label: 'Bon', color: 'bg-green-100 text-green-700 border-green-200', icon: CheckCircle2 },
+    { value: 'moyen', label: 'Moyen', color: 'bg-yellow-100 text-yellow-700 border-yellow-200', icon: AlertTriangle },
+    { value: 'mauvais', label: 'Mauvais', color: 'bg-red-100 text-red-700 border-red-200', icon: XCircle },
+    { value: 'nc', label: 'N/C', color: 'bg-gray-100 text-gray-700 border-gray-200', icon: HelpCircle },
+  ];
+  const thermalOptions = [{ value: "-", label: "-" }, { value: "+", label: "+" }, { value: "++", label: "++" }, { value: "+++", label: "+++" }];
+  const scenarioOptions = [{ value: '0', label: '—' }, ...Array.from({ length: 10 }, (_, i) => ({ value: String(i + 1), label: `Scénario ${i + 1}` }))];
+  const workSections = [
+    { key: 'shortTerm', title: 'Court Terme (0-3 ans)', icon: AlertTriangle, colorClass: 'text-red-700', bgClass: 'bg-red-50', borderClass: 'border-red-200' },
+    { key: 'mediumTerm', title: 'Moyen Terme (2-6 ans)', icon: Clock, colorClass: 'text-orange-700', bgClass: 'bg-orange-50', borderClass: 'border-orange-200' },
+    { key: 'longTerm', title: 'Long Terme (+6 ans)', icon: Calendar, colorClass: 'text-green-700', bgClass: 'bg-green-50', borderClass: 'border-green-200' },
+    { key: 'thermal', title: 'Amélioration Thermique', icon: ThermometerSun, colorClass: 'text-purple-700', bgClass: 'bg-purple-50', borderClass: 'border-purple-200' }
+  ];
+
+  // --- PDF GENERATOR UTILS ---
+  const loadScript = (src) => { return new Promise((resolve, reject) => { if (document.querySelector(`script[src="${src}"]`)) { resolve(); return; } const script = document.createElement('script'); script.src = src; script.onload = resolve; script.onerror = reject; document.head.appendChild(script); }); };
+  const drawAnnotatedImage = (doc, photoUrl, markers, x, y, width, height) => { return new Promise((resolve) => { const img = new Image(); img.crossOrigin = 'Anonymous'; img.src = photoUrl; img.onload = () => { const canvas = document.createElement('canvas'); canvas.width = img.naturalWidth; canvas.height = img.naturalHeight; const ctx = canvas.getContext('2d'); ctx.drawImage(img, 0, 0, img.naturalWidth, img.naturalHeight); if (markers && markers.length > 0) { const arrowSize = img.naturalWidth * 0.05; ctx.fillStyle = 'red'; ctx.strokeStyle = 'black'; ctx.lineWidth = img.naturalWidth * 0.005; markers.forEach(marker => { const px = (marker.x / 100) * img.naturalWidth; const py = (marker.y / 100) * img.naturalHeight; ctx.save(); ctx.translate(px, py); ctx.rotate(45 * Math.PI / 180); ctx.fillRect(-arrowSize / 2, -arrowSize / 2, arrowSize, arrowSize); ctx.strokeRect(-arrowSize / 2, -arrowSize / 2, arrowSize, arrowSize); ctx.restore(); }); } const annotatedUrl = canvas.toDataURL('image/jpeg', 0.9); doc.addImage(annotatedUrl, 'JPEG', x, y, width, height, undefined, 'FAST'); resolve(); }; img.onerror = () => { resolve(); }; if (img.complete) img.onload(); }); };
+  
+  // --- ACTIONS ---
+  const handleAddBuilding = () => { const newId = Date.now(); const newName = `Bâtiment ${String.fromCharCode(65 + buildings.length)}`; setBuildings([...buildings, { id: newId, name: newName }]); setActiveBuildingId(newId); setViewMode('building'); };
+  const moveBuilding = (id, direction, e) => { e.stopPropagation(); const index = buildings.findIndex(b => b.id === id); if (index === -1) return; if (direction === -1 && index === 0) return; if (direction === 1 && index === buildings.length - 1) return; const newBuildings = [...buildings]; const temp = newBuildings[index]; newBuildings[index] = newBuildings[index + direction]; newBuildings[index + direction] = temp; setBuildings(newBuildings); };
+  const handleDuplicateBuilding = (sourceId, e) => { e.stopPropagation(); const sourceBuilding = buildings.find(b => b.id === sourceId); if (!sourceBuilding) return; const newId = Date.now(); const newName = `${sourceBuilding.name} (Copie)`; const newBuildings = [...buildings]; const sourceIndex = buildings.findIndex(b => b.id === sourceId); newBuildings.splice(sourceIndex + 1, 0, { id: newId, name: newName }); setBuildings(newBuildings); const itemsToCopy = auditItems.filter(i => i.buildingId === sourceId); const newItems = itemsToCopy.map((item, idx) => ({ ...item, id: Date.now() + idx, buildingId: newId })); setAuditItems(prev => [...prev, ...newItems]); const worksToCopy = works.filter(w => w.buildingId === sourceId); const newWorks = worksToCopy.map((work, idx) => ({ ...work, id: Date.now() + 1000 + idx, buildingId: newId })); setWorks(prev => [...prev, ...newWorks]); const newSectionData = { ...sectionData }; Object.keys(sectionData).forEach(key => { if (key.startsWith(`${sourceId}_`)) { const tabPart = key.split('_')[1]; newSectionData[`${newId}_${tabPart}`] = { ...sectionData[key] }; } }); setSectionData(newSectionData); setActiveBuildingId(newId); setViewMode('building'); };
+  const handleDeleteRequest = (id, type, e) => { e.stopPropagation(); setDeleteModal({ show: true, type, id }); };
+  const confirmDeletion = () => { if (deleteModal.type === 'item') setAuditItems(prev => prev.filter(i => i.id !== deleteModal.id)); else if (deleteModal.type === 'work') setWorks(prev => prev.filter(w => w.id !== deleteModal.id)); else if (deleteModal.type === 'building') { setBuildings(prev => prev.filter(b => b.id !== deleteModal.id)); setAuditItems(prev => prev.filter(i => i.buildingId !== deleteModal.id)); setWorks(prev => prev.filter(w => w.buildingId !== deleteModal.id)); const newSectionData = { ...sectionData }; Object.keys(sectionData).forEach(key => { if(key.startsWith(`${deleteModal.id}_`)) delete newSectionData[key]; }); setSectionData(newSectionData); setActiveBuildingId(buildings.find(b => b.id !== deleteModal.id)?.id || null); if (buildings.length <= 1) setViewMode('general'); } else if (deleteModal.type === 'tab') { setTabs(prev => prev.filter(t => t.id !== deleteModal.id)); setAuditItems(prev => prev.filter(i => i.tabId !== deleteModal.id)); if (activeTabId === deleteModal.id) setActiveTabId(tabs.find(t => t.id !== deleteModal.id)?.id || null); } setDeleteModal({ show: false, type: null, id: null }); };
+  const handleSaveReport = () => { const activeBuilding = buildings.find(b => b.id === activeBuildingId); const reportData = { project: "Audit Architectural", building: activeBuilding ? activeBuilding.name : "Général", date: new Date().toLocaleDateString('fr-FR'), sectionDetails: sectionData, audit: auditItems.filter(i => i.buildingId === activeBuildingId), works: works.filter(w => w.buildingId === activeBuildingId), estimations: { total: calculateGlobalTotal() } }; const blob = new Blob([JSON.stringify(reportData, null, 2)], { type: 'application/json' }); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = `audit_${activeBuilding ? activeBuilding.name.replace(/\s+/g, '_') : 'general'}.json`; document.body.appendChild(a); a.click(); document.body.removeChild(a); };
+  const toggleExpand = (id) => setExpandedItems(prev => ({ ...prev, [id]: !prev[id] }));
+  const handleStateChange = (id, val) => { const newState = auditItems.find(i=>i.id===id)?.state === val ? null : val; setAuditItems(prev => prev.map(i => i.id === id ? { ...i, state: newState } : i)); if(newState==='mauvais'||newState==='moyen') setExpandedItems(prev=>({...prev,[id]:true})); };
+  const updateItemField = (id, f, v) => setAuditItems(prev => prev.map(i => i.id === id ? { ...i, [f]: v } : i));
+  const deleteAuditItem = (id) => setDeleteModal({ show: true, type: 'item', id });
+  const addAuditItem = () => { setAuditItems(prev => [...prev, { id: Date.now(), buildingId: activeBuildingId, tabId: activeTabId, label: "Nouveau point", state: null, comment: "", photos: [] }]); };
+  const handleDeletePhoto = (itemId, pid, e) => { e.stopPropagation(); setAuditItems(prev => prev.map(i => i.id === itemId ? { ...i, photos: i.photos.filter(p => p.id !== pid) } : i)); };
+  const handlePhotoCaptionChange = (itemId, pid, cap) => setAuditItems(prev => prev.map(i => i.id === itemId ? { ...i, photos: i.photos.map(p => p.id === pid ? { ...p, caption: cap } : p) } : i));
+  const startEditing = (id, currentName, type, e) => { e.stopPropagation(); setEditingId(id); setEditingType(type); setTempName(currentName); };
+  const saveName = () => { if(tempName.trim()) { if(editingType==='building') setBuildings(prev=>prev.map(b=>b.id===editingId?{...b,name:tempName}:b)); else setTabs(prev=>prev.map(t=>t.id===editingId?{...t,name:tempName}:t)); } setEditingId(null); };
+
+  const addWorkLine = (term) => setWorks(prev => [...prev, { id: Date.now() + Math.random(), buildingId: activeBuildingId, tabId: activeTabId, term, description: "", price: "", thermalGain: "-", scenario: '0' }]);
+  const removeWorkLine = (id) => setDeleteModal({ show: true, type: 'work', id });
+  const updateWorkLine = (id, field, value) => setWorks(prev => prev.map(item => item.id === id ? { ...item, [field]: value } : item));
+  const calculateTotal = (worksList) => worksList.reduce((sum, item) => sum + (parseFloat(item.price) || 0), 0);
+  const calculateGlobalTotal = () => calculateTotal(works);
+  const getTabProgress = (tId, bId = activeBuildingId) => { const relevantItems = auditItems.filter(i => i.buildingId === bId && i.tabId === tId); if (relevantItems.length === 0) return 0; const filled = relevantItems.filter(i => i.state !== null).length; return Math.round((filled / relevantItems.length) * 100); };
+  const calculateBuildingProgress = (buildingId) => { const buildingItems = auditItems.filter(i => i.buildingId === buildingId); if (buildingItems.length === 0) return 0; const filled = buildingItems.filter(i => i.state !== null).length; return Math.round((filled / buildingItems.length) * 100); };
+  const calculateGlobalProgress = () => { if (auditItems.length === 0) return 0; const filled = auditItems.filter(i => i.state !== null).length; return Math.round((filled / auditItems.length) * 100); };
+  const getCurrentTabWorks = (term) => works.filter(w => w.buildingId === activeBuildingId && w.tabId === activeTabId && w.term === term);
+  const handleAddTab = () => { const newId = `tab_${Date.now()}`; const newTabs = [...tabs, { id: newId, name: "Nouvelle catégorie" }]; setTabs(newTabs); setActiveTabId(newId); };
+  const handleDuplicateTab = (sourceTabId, e) => { e.stopPropagation(); const sourceTab = tabs.find(t => t.id === sourceTabId); if (!sourceTab) return; const newTabId = `tab_${Date.now()}`; const newTab = { id: newTabId, name: `${sourceTab.name} (Copie)` }; const sourceIndex = tabs.findIndex(t => t.id === sourceTabId); const newTabs = [...tabs]; newTabs.splice(sourceIndex + 1, 0, newTab); setTabs(newTabs); const itemsToCopy = auditItems.filter(item => item.tabId === sourceTabId); const newItems = itemsToCopy.map((item, index) => ({ ...item, id: Date.now() + index, tabId: newTabId, state: null, comment: "", photos: [] })); setAuditItems(prev => [...prev, ...newItems]); setActiveTabId(newTabId); };
+  const moveTab = (id, direction, e) => { e.stopPropagation(); const index = tabs.findIndex(t => t.id === id); if (index === -1) return; if (direction === -1 && index === 0) return; if (direction === 1 && index === tabs.length - 1) return; const newTabs = [...tabs]; const temp = newTabs[index]; newTabs[index] = newTabs[index + direction]; newTabs[index + direction] = temp; setTabs(newTabs); };
+  const moveAuditItem = (id, direction, e) => { e.stopPropagation(); const itemToMove = auditItems.find(i => i.id === id); if (!itemToMove) return; const currentList = auditItems.filter(item => item.buildingId === activeBuildingId && item.tabId === activeTabId && (item.section || 'main') === (itemToMove.section || 'main')); const indexInSubset = currentList.findIndex(i => i.id === id); if (indexInSubset === -1) return; if (direction === -1 && indexInSubset === 0) return; if (direction === 1 && indexInSubset === currentList.length - 1) return; const itemA = currentList[indexInSubset]; const itemB = currentList[indexInSubset + direction]; const indexA = auditItems.indexOf(itemA); const indexB = auditItems.indexOf(itemB); const newAuditItems = [...auditItems]; newAuditItems[indexA] = itemB; newAuditItems[indexB] = itemA; setAuditItems(newAuditItems); };
+  const updateSectionQuality = (e) => { const val = e.target.value; const key = `${activeBuildingId}_${activeTabId}`; setSectionData(prev => ({ ...prev, [key]: { ...prev[key], quality: val } })); };
+  const handleSectionPhotoUpload = async (event) => { const files = event.target.files; if (files && files[0]) { const url = await resizeImage(files[0]); const key = `${activeBuildingId}_${activeTabId}`; setSectionData(prev => ({ ...prev, [key]: { ...prev[key], photo: url } })); } };
+  const handlePhotoUpload = async (itemId, event) => { const files = Array.from(event.target.files); if (files.length > 0) { const promises = files.map(file => resizeImage(file)); const urls = await Promise.all(promises); setAuditItems(prev => prev.map(item => item.id === itemId ? { ...item, photos: [...(item.photos || []), ...urls.map(u => ({ id: Math.random(), url: u, caption: "", markers: [] }))] } : item)); } };
+  
+  // --- ACTIONS ID DATA ---
+  const updateIdData = (field, value) => setIdData(prev => ({ ...prev, [field]: value }));
+  // NOUVELLE FONCTION pour mettre à jour la valeur d'un risque
+  const updateRiskValue = (riskKey, value) => setIdData(prev => ({ ...prev, risks: { ...prev.risks, [riskKey]: value } }));
+  const handleIdPhotoUpload = async (field, event) => { const files = event.target.files; if (files && files[0]) { const url = await resizeImage(files[0]); setIdData(prev => ({ ...prev, [field]: url })); } };
+
+  // --- ACTIONS PHOTO EDITOR ---
+  const openPhotoEditor = (itemId, p) => setPhotoModal({ show: true, itemId, photo: { ...p, markers: p.markers || [] }, mode: 'annotate', scale: 1, offset: { x: 0, y: 0 } });
+  const handleEditorMouseDown = (e) => { if (photoModal.mode === 'crop') { isDraggingRef.current = true; lastMousePosRef.current = { x: e.clientX, y: e.clientY }; } };
+  const handleEditorMouseMove = (e) => { if (isDraggingRef.current && photoModal.mode === 'crop') { const deltaX = e.clientX - lastMousePosRef.current.x; const deltaY = e.clientY - lastMousePosRef.current.y; lastMousePosRef.current = { x: e.clientX, y: e.clientY }; setPhotoModal(prev => ({ ...prev, offset: { x: prev.offset.x + deltaX, y: prev.offset.y + deltaY } })); } };
+  const handleEditorMouseUp = () => { isDraggingRef.current = false; };
+  const handleImageClick = (e) => { if (photoModal.mode !== 'annotate') return; const rect = e.currentTarget.getBoundingClientRect(); const x = ((e.clientX - rect.left) / rect.width) * 100; const y = ((e.clientY - rect.top) / rect.height) * 100; setPhotoModal(prev => ({ ...prev, photo: { ...prev.photo, markers: [...prev.photo.markers, { id: Date.now(), x, y }] } })); };
+  const applyCrop = () => { if (!editorImageRef.current) return; const canvas = document.createElement('canvas'); const ctx = canvas.getContext('2d'); const img = editorImageRef.current; const containerRect = editorContainerRef.current.getBoundingClientRect(); const width = containerRect.width; const height = containerRect.height; canvas.width = width; canvas.height = height; ctx.fillStyle = "#000"; ctx.fillRect(0, 0, width, height); ctx.save(); ctx.translate(width/2, height/2); ctx.translate(photoModal.offset.x, photoModal.offset.y); ctx.scale(photoModal.scale, photoModal.scale); const ratio = Math.min(width / img.naturalWidth, height / img.naturalHeight); const drawW = img.naturalWidth * ratio; const drawH = img.naturalHeight * ratio; ctx.drawImage(img, -drawW/2, -drawH/2, drawW, drawH); ctx.restore(); const newUrl = canvas.toDataURL('image/jpeg', 0.9); setPhotoModal(prev => ({ ...prev, photo: { ...prev.photo, url: newUrl, markers: [] }, mode: 'annotate', scale: 1, offset: { x: 0, y: 0 } })); };
+  const savePhotoEdits = () => { setAuditItems(prev => prev.map(item => item.id === photoModal.itemId ? { ...item, photos: item.photos.map(p => p.id === photoModal.photo.id ? photoModal.photo : p) } : item)); setPhotoModal({ show: false, itemId: null, photo: null, mode: 'annotate', scale: 1, offset: {x:0, y:0} }); };
+
+  const handleGeneratePDF = async () => {
+    setIsGeneratingPDF(true);
+    try {
+      await loadScript("https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js");
+      await loadScript("https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.31/jspdf.plugin.autotable.min.js");
+      const { jsPDF } = window.jspdf;
+      const doc = new jsPDF();
+      const activeBuilding = buildings.find(b => b.id === activeBuildingId);
+      const buildingName = activeBuilding ? activeBuilding.name : "Général";
+      let yPos = 20;
+
+      // PAGE DE GARDE
+      doc.setFillColor(30, 41, 59); doc.rect(0, 0, 210, 40, 'F');
+      doc.setTextColor(255, 255, 255); doc.setFontSize(24); doc.text("Audit Architectural", 105, 20, { align: 'center' });
+      doc.setFontSize(14); doc.text(buildingName, 105, 30, { align: 'center' });
+      yPos = 60; doc.setTextColor(0, 0, 0); doc.setFontSize(12); doc.text(`Date du rapport : ${new Date().toLocaleDateString('fr-FR')}`, 20, yPos); yPos += 20;
+      
+      // FICHE D'IDENTIFICATION SI EXISTE
+      if (idData.address) {
+          doc.setFontSize(16); doc.text("Fiche d'Identification", 20, yPos); yPos += 10;
+          doc.setFontSize(11);
+          doc.text(`Adresse: ${idData.address}`, 20, yPos); yPos += 7;
+          doc.text(`Cadastre: ${idData.cadastreRef}`, 20, yPos); yPos += 15;
+      }
+
+      const firstSectionKey = `${activeBuildingId}_structure`;
+      if (sectionData[firstSectionKey]?.photo) { try { doc.addImage(sectionData[firstSectionKey].photo, 'JPEG', 20, yPos, 170, 100, undefined, 'FAST'); yPos += 110; } catch(e) { console.warn("Erreur image garde", e); } }
+
+      // SYNTHESE TRAVAUX
+      doc.addPage();
+      doc.setFillColor(30, 41, 59); doc.rect(0, 0, 210, 25, 'F');
+      doc.setTextColor(255, 255, 255); doc.setFontSize(16); doc.text("Synthèse Financière & Recommandations", 105, 15, { align: 'center' });
+      yPos = 40;
+      const allWorks = works.filter(w => w.buildingId === activeBuildingId);
+      const tableRows = [];
+      let grandTotal = 0;
+
+      workSections.forEach(section => {
+         const sectionWorks = allWorks.filter(w => w.term === section.key);
+         if (sectionWorks.length > 0) {
+            tableRows.push([{ content: section.title.toUpperCase(), colSpan: 3, styles: { fillColor: [240, 240, 240], fontStyle: 'bold', textColor: [50, 50, 50] } }]);
+            sectionWorks.forEach(work => {
+               const tabName = tabs.find(t => t.id === work.tabId)?.name || "Autre";
+               const scenarioLabels = work.scenario && work.scenario !== '0' ? ` (S ${work.scenario.split(',').join(', S ')})` : '';
+               tableRows.push([ `${tabName} : ${work.description}${scenarioLabels}`, work.thermalGain !== '-' ? `Gain ${work.thermalGain}` : '', `${parseFloat(work.price).toLocaleString()} €` ]);
+               grandTotal += parseFloat(work.price) || 0;
+            });
+            const subTotal = sectionWorks.reduce((sum, w) => sum + (parseFloat(w.price)||0), 0);
+            tableRows.push([{ content: `Sous-total ${section.title}`, colSpan: 2, styles: { fontStyle: 'bold', halign: 'right' } }, { content: `${subTotal.toLocaleString()} €`, styles: { fontStyle: 'bold' } }]);
+         }
+      });
+      tableRows.push([{ content: "TOTAL GÉNÉRAL H.T.", colSpan: 2, styles: { fillColor: [30, 41, 59], textColor: [255,255,255], fontStyle: 'bold', halign: 'right' } }, { content: `${grandTotal.toLocaleString()} €`, styles: { fillColor: [30, 41, 59], textColor: [255,255,255], fontStyle: 'bold' } }]);
+      doc.autoTable({ startY: yPos, head: [['Désignation des travaux', 'Performance', 'Estimation']], body: tableRows, theme: 'grid', headStyles: { fillColor: [59, 130, 246] }, styles: { fontSize: 10 }, columnStyles: { 0: { cellWidth: 'auto' }, 1: { cellWidth: 30 }, 2: { cellWidth: 40, halign: 'right' } } });
+
+      for (const tab of tabs) {
+         if (tab.id === 'synthese') continue;
+         const tabItems = auditItems.filter(i => i.buildingId === activeBuildingId && i.tabId === tab.id);
+         if (tabItems.length === 0) continue;
+         doc.addPage();
+         doc.setFillColor(240, 249, 255); doc.rect(0, 0, 210, 20, 'F');
+         doc.setTextColor(30, 58, 138); doc.setFontSize(14); doc.text(`Audit : ${tab.name}`, 15, 13);
+         const sectionKey = `${activeBuildingId}_${tab.id}`;
+         const quality = sectionData[sectionKey]?.quality;
+         if (quality && quality !== '0') { doc.setFontSize(10); const stars = "★".repeat(parseInt(quality)); doc.text(`Qualité Architecturale : ${stars}`, 150, 13); }
+         yPos = 30;
+         for (const item of tabItems) {
+            if (yPos > 250) { doc.addPage(); yPos = 20; }
+            doc.setFontSize(11); doc.setTextColor(0, 0, 0); doc.setFont(undefined, 'bold'); doc.text(item.label, 15, yPos);
+            let stateText = "Non renseigné"; let stateColor = [200, 200, 200];
+            if (item.state === 'bon') { stateText = "BON"; stateColor = [34, 197, 94]; } else if (item.state === 'moyen') { stateText = "MOYEN"; stateColor = [234, 179, 8]; } else if (item.state === 'mauvais') { stateText = "MAUVAIS"; stateColor = [239, 68, 68]; }
+            doc.setTextColor(stateColor[0], stateColor[1], stateColor[2]); doc.text(stateText, 170, yPos, { align: 'right' }); yPos += 7;
+            doc.setFont(undefined, 'normal'); doc.setFontSize(10);
+            const rawComment = item.comment || "Aucune observation.";
+            const cleanComment = rawComment.replace(/<[^/>][^>]*><\/[^>]+>/g, "");
+            const parts = cleanComment.split(/(<\/?(?:b|font)[^>]*>)/gi);
+            let currentX = 15; const maxWidth = 180; const lineHeight = 5; let isBold = false; let isRed = false; let isPurple = false;
+            for (const part of parts) {
+                if (!part) continue;
+                if (part.toLowerCase() === '<b>' || part.toLowerCase() === '<strong>') { isBold = true; continue; }
+                if (part.toLowerCase() === '</b>' || part.toLowerCase() === '</strong>') { isBold = false; continue; }
+                if (part.toLowerCase().includes('color="#ef4444"')) { isRed = true; isPurple = false; continue; }
+                if (part.toLowerCase().includes('color="#9333ea"')) { isPurple = true; isRed = false; continue; }
+                if (part.toLowerCase() === '</font>') { isRed = false; isPurple = false; continue; }
+                if (part.startsWith('<') && part.endsWith('>')) continue;
+                doc.setFont(undefined, isBold ? 'bold' : 'normal');
+                if (isRed) doc.setTextColor(239, 68, 68);
+                else if (isPurple) doc.setTextColor(147, 51, 234);
+                else doc.setTextColor(60, 60, 60);
+                const words = part.split(/(\s+)/);
+                for (const word of words) {
+                    const wordWidth = doc.getStringUnitWidth(word) * doc.internal.getFontSize() / doc.internal.scaleFactor;
+                    if (currentX + wordWidth > 15 + maxWidth) { yPos += lineHeight; currentX = 15; if (yPos > 270) { doc.addPage(); yPos = 20; } }
+                    const decodedWord = word.replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>');
+                    doc.text(decodedWord, currentX, yPos);
+                    currentX += wordWidth;
+                }
+            }
+            yPos += lineHeight + 5;
+            if (item.photos && item.photos.length > 0) {
+               let xPhoto = 15; const photoH = 40; const photoW = 40; if (yPos + photoH > 270) { doc.addPage(); yPos = 20; }
+               for (const photo of item.photos) {
+                  if (xPhoto + photoW > 190) { yPos += photoH + 5; xPhoto = 15; if (yPos + photoH > 270) { doc.addPage(); yPos = 20; } }
+                  await drawAnnotatedImage(doc, photo.url, photo.markers, xPhoto, yPos, photoW, photoH);
+                  if (photo.caption) { doc.setFontSize(8); doc.setTextColor(60, 60, 60); doc.text(photo.caption, xPhoto, yPos + photoH + 4); }
+                  xPhoto += photoW + 5;
+               }
+               yPos += photoH + 10;
+            }
+            doc.setDrawColor(230, 230, 230); doc.line(15, yPos - 5, 195, yPos - 5); yPos += 5;
+         }
+      }
+      doc.save(`Audit_${activeBuilding.name.replace(/\s+/g, '_')}.pdf`);
+    } catch (error) { console.error("Erreur génération PDF", error); alert("Erreur PDF. Voir console."); } finally { setIsGeneratingPDF(false); }
+  };
+
+  // --- RENDER IDENTIFICATION SHEET ---
+  const renderIdentification = () => {
+    const risksList = [
+        { key: 'flood', label: 'Inondation', icon: Waves },
+        { key: 'waterTable', label: 'Remontée de nappe', icon: Droplets },
+        { key: 'seism', label: 'Séisme', icon: Activity },
+        { key: 'groundMovement', label: 'Mouvement de terrain', icon: Mountain },
+        { key: 'clay', label: 'Retrait & gonflement des argiles', icon: Minimize2 },
+        { key: 'radon', label: 'Radon', icon: Wind },
+        { key: 'industrial', label: 'Installations industrielles classées', icon: Factory },
+        { key: 'nuclear', label: 'Nucléaire', icon: Zap },
+        { key: 'dangerousMaterial', label: 'Transport de matières dangereuses', icon: Truck },
+        { key: 'soilPollution', label: 'Pollution des sols', icon: Skull },
+    ];
+
+    // NOUVELLE liste des options pour les géorisques
+    const riskOptions = [
+        { value: 'inconnu', label: 'Inconnu', color: 'text-slate-500 bg-slate-100' },
+        { value: 'non_concerne', label: 'Non concerné', color: 'text-slate-500 bg-slate-100' },
+        { value: 'pas_de_risque', label: 'Pas de risque connu', color: 'text-green-700 bg-green-100' },
+        { value: 'faible', label: 'Faible', color: 'text-green-700 bg-green-100' },
+        { value: 'modere', label: 'Modéré', color: 'text-orange-700 bg-orange-100' },
+        { value: 'concerne', label: 'Concerné', color: 'text-red-700 bg-red-100' },
+        { value: 'existant', label: 'Existant', color: 'text-red-700 bg-red-100' },
+        { value: 'important', label: 'Important', color: 'text-red-700 bg-red-100' },
+    ];
+
+    // Helper pour récupérer la couleur associée à la valeur sélectionnée
+    const getRiskStyle = (value) => {
+        const opt = riskOptions.find(o => o.value === value);
+        return opt ? opt.color : 'text-slate-500 bg-slate-50';
+    };
+
+    return (
+        <div className="space-y-8 animate-in fade-in duration-300">
+            {/* Header */}
+            <div className="bg-slate-900 text-white p-6 rounded-xl shadow-lg flex items-center gap-4">
+                <FileSpreadsheet size={32} className="text-blue-400" />
+                <div>
+                    <h2 className="text-2xl font-bold">Fiche d'Identification</h2>
+                    <p className="text-slate-400 text-sm">Carte d'identité de la copropriété</p>
+                </div>
+            </div>
+
+            {/* Section 1: Localisation */}
+            <div className="bg-white border rounded-xl shadow-sm overflow-hidden">
+                <div className="bg-blue-50 px-6 py-4 border-b border-blue-100 flex items-center gap-2">
+                    <MapPin className="text-blue-600" />
+                    <h3 className="font-bold text-blue-900">LOCALISATION DE L’IMMEUBLE</h3>
+                </div>
+                <div className="p-6 grid grid-cols-1 md:grid-cols-2 gap-8">
+                    <div className="space-y-4">
+                        <div>
+                            <label className="block text-sm font-bold text-slate-700 mb-1">Adresse</label>
+                            <input type="text" value={idData.address} onChange={(e) => updateIdData('address', e.target.value)} className="w-full p-2 border rounded" placeholder="123 Rue de l'Exemple..." />
+                        </div>
+                        <div>
+                            <label className="block text-sm font-bold text-slate-700 mb-1">Références Cadastrales</label>
+                            <input type="text" value={idData.cadastreRef} onChange={(e) => updateIdData('cadastreRef', e.target.value)} className="w-full p-2 border rounded" placeholder="Section A n° 12..." />
+                        </div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-4">
+                        <div className="relative aspect-square bg-slate-50 border-2 border-dashed border-slate-300 rounded-lg flex flex-col items-center justify-center text-slate-400 cursor-pointer hover:border-blue-400 hover:text-blue-500 transition-colors group overflow-hidden">
+                            {idData.cadastrePhoto ? <img src={idData.cadastrePhoto} className="w-full h-full object-cover" /> : <><ImageIcon size={24} className="mb-2" /><span className="text-xs font-bold">Plan Cadastral</span></>}
+                            <input type="file" accept="image/*" className="absolute inset-0 opacity-0 cursor-pointer" onChange={(e) => handleIdPhotoUpload('cadastrePhoto', e)} />
+                        </div>
+                        <div className="relative aspect-square bg-slate-50 border-2 border-dashed border-slate-300 rounded-lg flex flex-col items-center justify-center text-slate-400 cursor-pointer hover:border-blue-400 hover:text-blue-500 transition-colors group overflow-hidden">
+                            {idData.coproPhoto ? <img src={idData.coproPhoto} className="w-full h-full object-cover" /> : <><Building size={24} className="mb-2" /><span className="text-xs font-bold">Photo Copropriété</span></>}
+                            <input type="file" accept="image/*" className="absolute inset-0 opacity-0 cursor-pointer" onChange={(e) => handleIdPhotoUpload('coproPhoto', e)} />
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            {/* Section 2: Description */}
+            <div className="bg-white border rounded-xl shadow-sm overflow-hidden">
+                <div className="bg-blue-50 px-6 py-4 border-b border-blue-100 flex items-center gap-2">
+                    <Building className="text-blue-600" />
+                    <h3 className="font-bold text-blue-900">DESCRIPTION DE L'IMMEUBLE</h3>
+                </div>
+                <div className="p-6 grid grid-cols-1 md:grid-cols-3 gap-6">
+                    <div><label className="block text-xs font-bold text-slate-500 mb-1 uppercase">Immatriculation</label><input type="text" value={idData.registration} onChange={(e) => updateIdData('registration', e.target.value)} className="w-full p-2 border rounded font-mono text-sm" placeholder="AA123456" /></div>
+                    <div><label className="block text-xs font-bold text-slate-500 mb-1 uppercase">SIRET</label><input type="text" value={idData.siret} onChange={(e) => updateIdData('siret', e.target.value)} className="w-full p-2 border rounded font-mono text-sm" placeholder="123 456 789 00012" /></div>
+                    <div><label className="block text-xs font-bold text-slate-500 mb-1 uppercase">Typologie</label><input type="text" value={idData.typology} onChange={(e) => updateIdData('typology', e.target.value)} className="w-full p-2 border rounded text-sm" placeholder="Immeuble collectif, R+4..." /></div>
+                    
+                    <div><label className="block text-xs font-bold text-slate-500 mb-1 uppercase">Nb Bâtiments</label><input type="number" value={idData.buildingCount} onChange={(e) => updateIdData('buildingCount', e.target.value)} className="w-full p-2 border rounded text-sm" /></div>
+                    <div><label className="block text-xs font-bold text-slate-500 mb-1 uppercase">Nb Lots</label><input type="number" value={idData.lotCount} onChange={(e) => updateIdData('lotCount', e.target.value)} className="w-full p-2 border rounded text-sm" /></div>
+                    <div><label className="block text-xs font-bold text-slate-500 mb-1 uppercase">Période Construction</label><input type="text" value={idData.constructionPeriod} onChange={(e) => updateIdData('constructionPeriod', e.target.value)} className="w-full p-2 border rounded text-sm" placeholder="1970-1980" /></div>
+
+                    <div className="flex items-center justify-between p-3 bg-slate-50 rounded border border-slate-200">
+                        <span className="text-sm font-medium">Présence Ascenseur</span>
+                        <button onClick={() => updateIdData('hasElevator', !idData.hasElevator)} className={`w-12 h-6 rounded-full transition-colors relative ${idData.hasElevator ? 'bg-blue-600' : 'bg-slate-300'}`}>
+                            <div className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-transform ${idData.hasElevator ? 'left-7' : 'left-1'}`}></div>
+                        </button>
+                    </div>
+                    <div className="flex items-center justify-between p-3 bg-slate-50 rounded border border-slate-200">
+                        <span className="text-sm font-medium">Parking Sous-sol</span>
+                        <button onClick={() => updateIdData('hasUndergroundParking', !idData.hasUndergroundParking)} className={`w-12 h-6 rounded-full transition-colors relative ${idData.hasUndergroundParking ? 'bg-blue-600' : 'bg-slate-300'}`}>
+                            <div className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-transform ${idData.hasUndergroundParking ? 'left-7' : 'left-1'}`}></div>
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            {/* Section 3: Georisques (MISE À JOUR) */}
+            <div className="bg-white border rounded-xl shadow-sm overflow-hidden">
+                <div className="bg-red-50 px-6 py-4 border-b border-red-100 flex items-center gap-2">
+                    <AlertTriangle className="text-red-600" />
+                    <h3 className="font-bold text-red-900">GÉORISQUES</h3>
+                </div>
+                <div className="p-6 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                    {risksList.map(risk => (
+                        <div key={risk.key} className="flex flex-col p-3 rounded border border-slate-200 bg-white gap-2 shadow-sm hover:shadow-md transition-shadow">
+                            <div className="flex items-center gap-2 mb-1">
+                                <div className="p-1.5 rounded-full bg-slate-100 text-slate-500">
+                                    <risk.icon size={16} />
+                                </div>
+                                <span className="text-sm font-bold text-slate-700">{risk.label}</span>
+                            </div>
+                            <select 
+                                value={idData.risks[risk.key] || 'inconnu'} 
+                                onChange={(e) => updateRiskValue(risk.key, e.target.value)}
+                                className={`w-full text-xs font-bold p-2 rounded border border-transparent focus:border-blue-300 focus:ring-2 focus:ring-blue-100 cursor-pointer outline-none transition-colors ${getRiskStyle(idData.risks[risk.key] || 'inconnu')}`}
+                            >
+                                {riskOptions.map(opt => (
+                                    <option key={opt.value} value={opt.value} className="bg-white text-slate-700">
+                                        {opt.label}
+                                    </option>
+                                ))}
+                            </select>
+                        </div>
+                    ))}
+                </div>
+            </div>
+        </div>
+    );
+  };
+
+  // --- RENDER IMPROVEMENTS SYNTHESIS ---
+  const renderImprovementsSynthesis = () => {
+    return (
+        <div className="border rounded-xl overflow-hidden shadow-sm bg-white mb-8">
+            <div className="p-4 bg-purple-50 border-b border-purple-200 flex justify-between items-center">
+                <div className="flex items-center gap-2 font-bold text-lg text-purple-800">
+                    <Leaf size={20} />
+                    Synthèse des travaux & améliorations
+                </div>
+            </div>
+            {buildings.map(b => {
+                const maintenanceItems = auditItems.filter(i => 
+                    i.buildingId === b.id && 
+                    i.label.includes("Etat d’entretien général")
+                );
+
+                if (maintenanceItems.length === 0) return null;
+
+                return (
+                    <div key={b.id} className="p-0 border-b last:border-b-0 border-slate-100">
+                        {buildings.length > 1 && (
+                             <div className="bg-slate-100 px-4 py-2 text-xs font-bold text-slate-600 uppercase tracking-wide">
+                                 {b.name}
+                             </div>
+                        )}
+                        <div className="divide-y divide-slate-100">
+                             <div className="flex bg-slate-50 text-xs font-semibold text-slate-500 uppercase tracking-wide">
+                                 <div className="flex-1 p-3">Localisation</div>
+                                 <div className="w-32 p-3 text-center">État</div>
+                                 <div className="w-40 p-3 text-center">Amélioration Thermique</div>
+                             </div>
+
+                             {maintenanceItems.map(item => {
+                                 const tabName = tabs.find(t => t.id === item.tabId)?.name || "Autre";
+                                 let badgeClass = "bg-gray-100 text-gray-500";
+                                 if (item.state === 'bon') badgeClass = "bg-green-100 text-green-700 border-green-200";
+                                 if (item.state === 'moyen') badgeClass = "bg-yellow-100 text-yellow-700 border-yellow-200";
+                                 if (item.state === 'mauvais') badgeClass = "bg-red-100 text-red-700 border-red-200";
+                                 
+                                 return (
+                                     <div key={item.id} className="flex flex-col hover:bg-slate-50 transition-colors">
+                                         <div className="flex items-center">
+                                             <div className="flex-1 p-3 text-sm font-medium text-slate-700 flex items-center gap-2">
+                                                 <Folder size={14} className="text-slate-400" />
+                                                 {tabName}
+                                             </div>
+                                             <div className="w-32 p-3 text-center">
+                                                 <span className={`text-xs font-bold px-2 py-1 rounded border ${badgeClass}`}>
+                                                     {item.state ? item.state.toUpperCase() : 'N/C'}
+                                                 </span>
+                                             </div>
+                                             <div className="w-40 p-3 text-center">
+                                                 <div className={`text-xs font-bold px-2 py-1 rounded border ${
+                                                     item.thermalImprovement === 'oui' ? 'bg-purple-100 text-purple-700 border-purple-200' : 
+                                                     item.thermalImprovement === 'minime' ? 'bg-blue-50 text-blue-600 border-blue-200' : 
+                                                     'bg-slate-50 text-slate-500 border-slate-200'
+                                                 }`}>
+                                                     {item.thermalImprovement ? item.thermalImprovement.charAt(0).toUpperCase() + item.thermalImprovement.slice(1) : 'Non'}
+                                                 </div>
+                                             </div>
+                                         </div>
+                                         {item.comment && (
+                                             <div className="px-4 pb-3 pl-10">
+                                                 <div className="text-sm text-slate-600 bg-white border border-slate-200 rounded p-3 shadow-sm" dangerouslySetInnerHTML={{ __html: item.comment }} />
+                                             </div>
+                                         )}
+                                     </div>
+                                 );
+                             })}
+                        </div>
+                    </div>
+                );
+            })}
+        </div>
+    );
+  };
+
+  // --- RENDER SYNTHESIS ---
+  const renderSynthesis = () => {
+    const allWorks = works; 
+    return (
+      <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
+        {renderImprovementsSynthesis()}
+        <div className="bg-slate-900 text-white p-6 rounded-xl shadow-lg flex flex-col md:flex-row justify-between items-center gap-4">
+          <div><h2 className="text-2xl font-bold flex items-center gap-2"><Calculator className="text-blue-400" /> Synthèse Financière</h2><p className="text-slate-400 text-sm mt-1">Récapitulatif global des travaux</p></div>
+        </div>
+        {workSections.map((section) => {
+          const termWorks = allWorks.filter(w => w.term === section.key);
+          if (termWorks.length === 0) return null; 
+          const worksByTab = {};
+          termWorks.forEach(work => { if (!worksByTab[work.tabId]) worksByTab[work.tabId] = []; worksByTab[work.tabId].push(work); });
+          const sectionTotal = calculateTotal(termWorks);
+          return (
+            <div key={section.key} className={`border rounded-xl overflow-hidden shadow-sm bg-white`}>
+              <div className={`p-4 ${section.bgClass} border-b ${section.borderClass} flex justify-between items-center`}>
+                <div className={`flex items-center gap-2 font-bold text-lg ${section.colorClass}`}><section.icon size={20} />{section.title}</div>
+                <div className="font-bold bg-white px-3 py-1 rounded border shadow-sm">{sectionTotal.toLocaleString()} €</div>
+              </div>
+              <div className="p-0">
+                {Object.keys(worksByTab).map(tabId => {
+                  const tabName = tabs.find(t => t.id === tabId)?.name || "Autre";
+                  const tabWorks = worksByTab[tabId];
+                  const tabTotal = calculateTotal(tabWorks);
+                  return (
+                    <div key={tabId} className="border-b last:border-b-0 border-slate-100">
+                      <div className="bg-slate-50 px-4 py-2 flex justify-between items-center text-xs font-bold text-slate-500 uppercase tracking-wide">
+                        <span className="flex items-center gap-2"><Folder size={14} /> {tabName}</span><span>Sous-total : {tabTotal.toLocaleString()} €</span>
+                      </div>
+                      <div className="divide-y divide-slate-100">
+                        {tabWorks.map(work => {
+                           const buildingName = buildings.find(b => b.id === work.buildingId)?.name || "Inconnu";
+                           const scenarioLabels = work.scenario && work.scenario !== '0' ? ` (S ${work.scenario.split(',').join(', S ')})` : '';
+                           return (
+                            <div key={work.id} className="px-4 py-3 flex items-center gap-4 hover:bg-slate-50 transition-colors">
+                              <div className="flex-1"><div className="text-sm font-medium text-slate-700">{work.description}{scenarioLabels}</div><div className="text-[10px] text-slate-400 mt-0.5 flex items-center gap-1"><Home size={10}/> {buildingName}</div></div>
+                              {work.thermalGain && work.thermalGain !== '-' && (<span className="text-xs font-bold text-purple-600 bg-purple-50 px-2 py-1 rounded flex-shrink-0">Gain {work.thermalGain}</span>)}
+                              <div className="font-mono text-sm text-slate-900 w-24 text-right flex-shrink-0">{parseFloat(work.price).toLocaleString()} €</div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    );
+  };
+
+  // --- RENDER STANDARD TAB ---
+  const renderStandardTab = () => {
+    const currentAuditItems = auditItems.filter(item => item.buildingId === activeBuildingId && item.tabId === activeTabId);
+    const activeSectionKey = `${activeBuildingId}_${activeTabId}`;
+    const currentSectionData = sectionData[activeSectionKey] || { quality: '0', photo: null };
+    const mainItems = currentAuditItems.filter(i => !i.section || i.section === 'main');
+    const secondaryItems = currentAuditItems.filter(i => i.section === 'secondary');
+
+    const renderItemList = (items) => {
+      return items.map((item, index) => {
+        const isFixed = item.label.includes("Etat d’entretien général") || item.label === "Caractéristiques thermiques";
+        const isMaintenance = item.label.includes("Etat d’entretien général");
+
+        return (
+        <div key={item.id} className={`border rounded-lg transition-all duration-200 ${expandedItems[item.id] ? 'ring-2 ring-blue-100 border-blue-300 shadow-md' : 'border-slate-200 hover:border-blue-200 shadow-sm'} ${item.customColor || 'bg-white'}`}>
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between p-4 cursor-pointer gap-4 group" onClick={() => toggleExpand(item.id)}>
+                <div className="flex items-center gap-3 flex-1 overflow-hidden">
+                    <span className="flex-shrink-0 w-8 h-8 rounded-full bg-slate-100 text-slate-500 flex items-center justify-center font-bold text-sm">{mainItems.includes(item) ? index + 1 : '•'}</span>
+                    {isFixed ? (
+                        <span className="font-bold text-slate-700 flex-1 px-2 py-1">{item.label}</span>
+                    ) : (
+                        <input type="text" value={item.label} onClick={(e) => e.stopPropagation()} onChange={(e) => updateItemField(item.id, 'label', e.target.value)} className="font-medium text-slate-700 bg-transparent border border-transparent hover:border-slate-300 focus:border-blue-400 focus:bg-white rounded px-2 py-1 flex-1 min-w-[150px] outline-none" />
+                    )}
+                </div>
+                
+                <div className="flex flex-wrap items-center gap-2" onClick={(e) => e.stopPropagation()}>
+                    
+                    {isMaintenance && (
+                        <div className="flex items-center gap-2 mr-4 bg-white/50 px-2 py-1 rounded border border-slate-200">
+                            <span className="text-[10px] font-bold text-slate-500 uppercase">Amél. Thermique</span>
+                            <select 
+                                value={item.thermalImprovement || 'non'} 
+                                onChange={(e) => updateItemField(item.id, 'thermalImprovement', e.target.value)}
+                                className={`text-xs font-bold px-2 py-0.5 rounded cursor-pointer outline-none border-0 bg-transparent ${
+                                    item.thermalImprovement === 'oui' ? 'text-purple-700' : 
+                                    item.thermalImprovement === 'minime' ? 'text-blue-600' : 
+                                    'text-slate-500'
+                                }`}
+                            >
+                                <option value="non">Non</option>
+                                <option value="minime">Minime</option>
+                                <option value="oui">Oui</option>
+                            </select>
+                        </div>
+                    )}
+
+                    {item.label !== "Caractéristiques thermiques" && states.map((s) => (
+                        <button key={s.value} onClick={() => handleStateChange(item.id, s.value)} className={`flex items-center justify-center w-9 h-9 rounded-full border transition-all ${item.state === s.value ? s.color + ' ring-2 ring-offset-1 ring-slate-200 transform scale-110' : 'bg-white border-slate-200 text-slate-300 hover:bg-slate-50'}`}><s.icon size={16} /></button>
+                    ))}
+                    
+                    <div className="w-px h-6 bg-slate-200 mx-2"></div>
+                    
+                    {!isFixed && (
+                        <>
+                            <div className="flex flex-col gap-0.5 mr-2">
+                                <button onClick={(e) => moveAuditItem(item.id, -1, e)} disabled={items.indexOf(item) === 0} className="text-slate-300 hover:text-blue-500 disabled:opacity-20"><ArrowUp size={12} /></button>
+                                <button onClick={(e) => moveAuditItem(item.id, 1, e)} disabled={items.indexOf(item) === items.length - 1} className="text-slate-300 hover:text-blue-500 disabled:opacity-20"><ArrowDown size={12} /></button>
+                            </div>
+                            <button onClick={() => deleteAuditItem(item.id)} className="p-2 text-slate-300 hover:text-red-500 rounded-full"><Trash2 size={16} /></button>
+                        </>
+                    )}
+
+                    <button onClick={() => toggleExpand(item.id)} className="ml-1 text-slate-400 hover:text-slate-600 p-2">{expandedItems[item.id] ? <ChevronUp size={18} /> : <ChevronDown size={18} />}</button>
+                </div>
+            </div>
+            {(expandedItems[item.id] || (item.state === 'mauvais' || item.state === 'moyen')) && (
+                <div className="px-4 pb-4 pt-0">
+                    <div className="ml-0 sm:ml-11 mt-2">
+                        <RichTextEditor itemId={item.id} value={item.comment} onChange={(value) => updateItemField(item.id, 'comment', value)} placeholder="Observations détaillées..." />
+                    </div>
+                    <div className="ml-0 sm:ml-11 mt-4">
+                        <div className="flex flex-wrap gap-4">
+                            {item.photos && item.photos.map(photo => (
+                                <div key={photo.id} className="relative group w-40">
+                                    <div className="relative aspect-square bg-slate-100 rounded-lg overflow-hidden border border-slate-200 cursor-zoom-in" onClick={() => openPhotoEditor(item.id, photo)}>
+                                        <img src={photo.url} className="w-full h-full object-cover" />
+                                        {photo.markers?.map(marker => (
+                                          <div key={marker.id} className="absolute w-6 h-6 text-red-600 pointer-events-none drop-shadow-md" style={{ left: `${marker.x}%`, top: `${marker.y}%`, transform: 'translate(-50%, -50%) rotate(45deg)' }}>
+                                             <ArrowRight size={20} className="transform rotate-180" strokeWidth={3} />
+                                          </div>
+                                        ))}
+                                    </div>
+                                    <button onClick={(e) => handleDeletePhoto(item.id, photo.id, e)} className="absolute -top-2 -right-2 bg-white p-1 rounded-full text-slate-400 hover:text-red-600 shadow-md border"><X size={14} /></button>
+                                    <input type="text" placeholder="Légende..." value={photo.caption} onChange={(e) => handlePhotoCaptionChange(item.id, photo.id, e.target.value)} className="w-full mt-1 text-xs border-b border-transparent hover:border-slate-300 focus:border-blue-400 bg-transparent py-1 px-1 text-center outline-none" />
+                                </div>
+                            ))}
+                            <label className="flex flex-col items-center justify-center w-24 h-24 sm:w-28 sm:h-28 border-2 border-dashed border-slate-300 rounded-lg cursor-pointer hover:bg-slate-50 hover:border-blue-400 hover:text-blue-500 text-slate-400 transition-all bg-white/50">
+                                <Camera size={24} className="mb-1" /><span className="text-xs font-medium">Ajouter</span>
+                                <input type="file" accept="image/*" multiple className="hidden" onChange={(e) => handlePhotoUpload(item.id, e)} />
+                            </label>
+                        </div>
+                    </div>
+                </div>
+            )}
+        </div>
+      );
+      });
+    };
+
+    return (
+      <div className="space-y-8 animate-in fade-in duration-300">
+        <div className="bg-blue-50 p-4 rounded-lg border border-blue-100 flex flex-col sm:flex-row gap-4 items-center">
+            <div className="relative w-24 h-24 bg-white rounded-lg border-2 border-dashed border-blue-200 flex-shrink-0 flex items-center justify-center cursor-pointer overflow-hidden group hover:border-blue-400 transition-colors shadow-sm">
+                {currentSectionData.photo ? <img src={currentSectionData.photo} alt="Section" className="w-full h-full object-cover" /> : <div className="text-center text-blue-300 p-2"><Camera size={24} className="mx-auto mb-1" /><span className="text-[10px] font-medium leading-tight block">Ajouter photo</span></div>}
+                <input type="file" accept="image/*" className="absolute inset-0 opacity-0 cursor-pointer" onChange={handleSectionPhotoUpload} />
+            </div>
+            <div className="flex-1 w-full">
+                <div className="flex flex-col sm:flex-row justify-between items-start gap-2">
+                    <div>
+                        <h3 className="font-semibold text-blue-900 text-lg">Audit {tabs.find(t => t.id === activeTabId)?.name}</h3>
+                        <div className="flex items-center gap-3 mt-3">
+                            <span className="text-xs font-bold text-blue-800 uppercase tracking-wide">Qualité Architecturale</span>
+                            <div className="relative inline-block">
+                                <select value={currentSectionData.quality} onChange={updateSectionQuality} className="appearance-none bg-white border border-blue-200 text-yellow-500 text-lg py-1 px-3 pr-8 rounded focus:outline-none focus:ring-2 focus:ring-blue-400 cursor-pointer shadow-sm">
+                                    <option value="0" className="text-slate-300">☆</option><option value="1">★</option><option value="2">★★</option><option value="3">★★★</option>
+                                </select>
+                                <ChevronDown size={14} className="absolute right-2 top-3 text-blue-500 pointer-events-none" />
+                            </div>
+                        </div>
+                    </div>
+                    <div className="flex items-center gap-2 self-start sm:self-center"><span className="text-xs font-bold text-blue-500 bg-white px-3 py-1.5 rounded-full border border-blue-200 shadow-sm whitespace-nowrap">{getTabProgress(activeTabId)}% Complété</span></div>
+                </div>
+            </div>
+        </div>
+
+        <div className="space-y-4">
+            <h2 className="text-lg font-bold text-slate-800 border-b pb-2 mb-4">Points de Contrôle</h2>
+            {renderItemList(mainItems)}
+            <button onClick={addAuditItem} className="w-full py-3 border-2 border-dashed border-slate-300 rounded-lg text-slate-500 hover:text-blue-600 hover:border-blue-400 hover:bg-blue-50 transition-all flex items-center justify-center gap-2 font-medium"><Plus size={20} /> Ajouter un point de contrôle</button>
+        </div>
+
+        {secondaryItems.length > 0 && (
+            <div className="space-y-4 pt-4 border-t border-slate-100">
+                {renderItemList(secondaryItems)}
+            </div>
+        )}
+
+        <div className="space-y-8 pt-8 border-t-2 border-slate-200 mt-8">
+            <div className="flex justify-between items-center"><h2 className="text-xl font-bold text-slate-900 flex items-center gap-2"><Hammer className="h-6 w-6 text-slate-700" /> Recommandation de Travaux ({tabs.find(t=>t.id===activeTabId)?.name})</h2></div>
+            <div className="grid grid-cols-1 gap-8">
+                {workSections.map((section) => {
+                    const sectionWorks = getCurrentTabWorks(section.key);
+                    return (
+                        <div key={section.key} className={`${section.bgClass} rounded-xl border ${section.borderClass} shadow-sm overflow-hidden`}>
+                            <div className={`px-5 py-4 border-b ${section.borderClass} flex justify-between items-center bg-white/50`}>
+                                <div className={`flex items-center gap-2 ${section.colorClass} font-bold uppercase tracking-wider text-sm`}><section.icon className="h-5 w-5" />{section.title}</div>
+                                <div className={`font-bold ${section.colorClass} bg-white px-3 py-1 rounded-md shadow-sm border ${section.borderClass}`}>{calculateTotal(sectionWorks).toLocaleString()} €</div>
+                            </div>
+                            <div className="p-4 space-y-2">
+                                {sectionWorks.map((work) => (
+                                    <div key={work.id} className="flex items-center gap-2 border-b border-black/5 pb-2 last:border-0 last:pb-0">
+                                        <div className="flex-grow"><input type="text" value={work.description} onChange={(e) => updateWorkLine(work.id, 'description', e.target.value)} placeholder="Description..." className={`w-full p-2 text-sm border border-transparent bg-white/60 rounded hover:bg-white focus:bg-white focus:ring-2 focus:ring-blue-400 focus:outline-none transition-all placeholder:text-slate-400`} /></div>
+                                        <div className="relative w-28 flex-shrink-0"><input type="number" value={work.price} onChange={(e) => updateWorkLine(work.id, 'price', e.target.value)} placeholder="0" className="w-full p-2 pr-6 text-sm border border-transparent bg-white/60 rounded hover:bg-white focus:bg-white focus:outline-none font-mono text-right" /><Euro size={12} className="absolute right-2 top-3 text-slate-400 pointer-events-none" /></div>
+                                        <div className="relative w-24 flex-shrink-0"><MultiSelectScenario work={work} onChange={updateWorkLine} options={scenarioOptions} /></div>
+                                        <div className="relative w-20 flex-shrink-0"><select value={work.thermalGain} onChange={(e) => updateWorkLine(work.id, 'thermalGain', e.target.value)} className="w-full p-2 text-sm border border-transparent bg-white/60 rounded hover:bg-white focus:bg-white focus:outline-none cursor-pointer">{thermalOptions.map(opt => (<option key={opt.value} value={opt.value}>{opt.label}</option>))}</select></div>
+                                        <button onClick={() => removeWorkLine(work.id)} className="p-2 text-slate-400 hover:text-red-500 rounded"><Trash2 size={16} /></button>
+                                    </div>
+                                ))}
+                                <button onClick={() => addWorkLine(section.key)} className={`flex items-center gap-1.5 text-xs font-bold px-3 py-2 rounded-lg mt-2 transition-colors hover:bg-white/50 text-slate-600`}><Plus size={14} />AJOUTER UN POSTE</button>
+                            </div>
+                        </div>
+                    );
+                })}
+            </div>
+        </div>
+      </div>
+    );
+  };
+
+  return (
+    <div className="min-h-screen bg-slate-50 font-sans text-slate-800 p-4 md:p-8 relative">
+      <div className="max-w-5xl mx-auto bg-white shadow-xl rounded-xl overflow-hidden border border-slate-200 flex flex-col min-h-[800px]">
+        <div className="bg-slate-900 text-white p-6 pb-0 relative">
+            <div className="flex items-center justify-between">
+              <h1 className="text-2xl font-bold flex items-center gap-2 mb-4"><Building className="h-6 w-6 text-blue-400" /> Audit Architectural</h1>
+              <div className="absolute top-4 right-4 z-10">
+                <button onClick={handleGeneratePDF} disabled={isGeneratingPDF} className={`flex items-center gap-2 px-4 py-2 rounded-lg shadow-lg transition-colors text-sm font-medium ${isGeneratingPDF ? 'bg-slate-400 cursor-wait' : 'bg-blue-600 hover:bg-blue-700'} text-white`}>
+                  {isGeneratingPDF ? <Loader2 size={16} className="animate-spin" /> : <FileText size={16} />}
+                  {isGeneratingPDF ? 'Génération...' : 'Générer le Rapport PDF'}
+                </button>
+              </div>
+            </div>
+            <div className="flex items-end space-x-1 overflow-x-auto no-scrollbar">
+                <button onClick={() => setViewMode('general')} className={`flex items-center gap-2 px-5 py-3 rounded-t-lg font-medium text-sm border-b-0 ${viewMode === 'general' ? 'bg-white text-slate-900' : 'bg-slate-800 text-slate-400 hover:bg-slate-700'}`}><LayoutDashboard size={16} /> GÉNÉRAL</button>
+                <div className="w-px h-6 bg-slate-700 mx-2 mb-3 self-end"></div>
+                <button onClick={() => setViewMode('identification')} className={`flex items-center gap-2 px-5 py-3 rounded-t-lg font-medium text-sm border-b-0 ${viewMode === 'identification' ? 'bg-white text-slate-900' : 'bg-slate-800 text-slate-400 hover:bg-slate-700'}`}><FileSpreadsheet size={16} /> FICHE D’IDENTIFICATION</button>
+                <div className="w-px h-6 bg-slate-700 mx-2 mb-3 self-end"></div>
+                {buildings.map((b, idx) => (
+                    <div key={b.id} onClick={() => { setViewMode('building'); setActiveBuildingId(b.id); }} className={`group relative flex items-center gap-2 px-5 py-3 rounded-t-lg font-medium text-sm cursor-pointer select-none ${viewMode === 'building' && activeBuildingId === b.id ? 'bg-white text-blue-600' : 'bg-slate-800 text-slate-400 hover:bg-slate-700'}`}>
+                        <Home size={16} /> 
+                        {editingId===b.id && editingType==='building' ? <input autoFocus value={tempName} onChange={e=>setTempName(e.target.value)} onBlur={saveName} onKeyDown={e=>e.key==='Enter'&&saveName()} className="w-20 text-slate-900 px-1 rounded" /> : <span onDoubleClick={(e)=>startEditing(b.id,b.name,'building',e)}>{b.name}</span>}
+                        <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full border ml-1 ${viewMode === 'building' && activeBuildingId === b.id ? 'bg-blue-100 text-blue-700 border-blue-200' : 'bg-slate-700 text-slate-300 border-slate-600'}`}>{calculateBuildingProgress(b.id)}%</span>
+                        {viewMode === 'building' && activeBuildingId === b.id && editingId !== b.id && (
+                            <div className="flex items-center ml-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                                <button onClick={(e)=>moveBuilding(b.id,-1,e)} disabled={idx===0} className="p-0.5 hover:text-blue-500 disabled:opacity-30 hover:bg-slate-100 rounded"><ChevronLeft size={10}/></button>
+                                <button onClick={(e)=>moveBuilding(b.id,1,e)} disabled={idx===buildings.length-1} className="p-0.5 hover:text-blue-500 disabled:opacity-30 hover:bg-slate-100 rounded"><ChevronRight size={10}/></button>
+                                <button onClick={(e)=>handleDuplicateBuilding(b.id,e)} className="p-0.5 hover:text-blue-500 ml-1 hover:bg-slate-100 rounded" title="Dupliquer le bâtiment"><Copy size={10}/></button>
+                                <button onClick={(e)=>startEditing(b.id,b.name,'building',e)} className="p-0.5 hover:text-blue-500 ml-1 hover:bg-slate-100 rounded"><Edit2 size={10}/></button>
+                                {buildings.length > 1 && <button onClick={(e)=>handleDeleteRequest(b.id,'building',e)} className="p-0.5 hover:text-red-500 hover:bg-red-50 rounded"><Trash2 size={10}/></button>}
+                            </div>
+                        )}
+                    </div>
+                ))}
+                <button onClick={handleAddBuilding} className="mb-2 ml-1 p-1 rounded-full bg-slate-800 text-slate-400 hover:text-white"><Plus size={16} /></button>
+                <div className="w-px h-6 bg-slate-700 mx-2 mb-3 self-end"></div>
+                <button onClick={() => setViewMode('synthese')} className={`flex items-center gap-2 px-5 py-3 rounded-t-lg font-medium text-sm border-b-0 ${viewMode === 'synthese' ? 'bg-white text-blue-600 shadow-sm z-10' : 'bg-slate-800 text-slate-400 hover:bg-slate-700'}`}><Calculator size={16} /> SYNTHÈSE</button>
+            </div>
+        </div>
+
+        {viewMode === 'building' && (
+            <div className="bg-white border-b border-slate-200 px-4 pt-2 flex overflow-x-auto no-scrollbar gap-2 items-end">
+                {tabs.map((tab, idx) => {
+                    const tabProgress = getTabProgress(tab.id);
+                    return (
+                        <div key={tab.id} onClick={() => setActiveTabId(tab.id)} className={`group relative flex items-center gap-2 px-4 py-2 border-b-2 cursor-pointer select-none ${activeTabId === tab.id ? 'border-blue-500 text-blue-600' : 'border-transparent text-slate-500 hover:text-slate-800'}`}>
+                            {editingId===tab.id && editingType==='tab' ? (
+                                <input autoFocus value={tempName} onChange={e=>setTempName(e.target.value)} onBlur={saveName} onKeyDown={e=>e.key==='Enter'&&saveName()} className="w-20 text-slate-900 px-1 border rounded" />
+                            ) : (<span onDoubleClick={(e)=>startEditing(tab.id,tab.name,'tab',e)}>{tab.name}</span>)}
+                            <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full ${activeTabId === tab.id ? 'bg-blue-100 text-blue-700' : 'bg-slate-100 text-slate-500'}`}>{tabProgress}%</span>
+                            {activeTabId === tab.id && (
+                                <div className="flex items-center ml-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                    <button onClick={(e)=>moveTab(tab.id,-1,e)} disabled={idx===0} className="p-0.5 hover:text-blue-500 disabled:opacity-30"><ChevronLeft size={10}/></button>
+                                    <button onClick={(e)=>moveTab(tab.id,1,e)} disabled={idx===tabs.length-1} className="p-0.5 hover:text-blue-500 disabled:opacity-30"><ChevronRight size={10}/></button>
+                                    <button onClick={(e)=>handleDuplicateTab(tab.id,e)} className="p-0.5 hover:text-blue-500 ml-1"><Copy size={10}/></button>
+                                    <button onClick={(e)=>startEditing(tab.id,tab.name,'tab',e)} className="p-0.5 hover:text-blue-500 ml-1"><Edit2 size={10}/></button>
+                                    <button onClick={(e)=>handleDeleteRequest(tab.id,'tab',e)} className="p-0.5 hover:text-red-500"><X size={10}/></button>
+                                </div>
+                            )}
+                        </div>
+                    );
+                })}
+                <button onClick={handleAddTab} className="mb-2 ml-2 p-1 rounded-full text-slate-400 hover:text-blue-600"><Plus size={18} /></button>
+            </div>
+        )}
+
+        <div className="p-6 flex-1 bg-slate-50/50">
+            {viewMode === 'general' ? (
+                <div className="flex flex-col items-center justify-center h-full text-slate-500 min-h-[400px] gap-8">
+                  <div className="text-center">
+                     <div className="w-20 h-20 bg-blue-100 rounded-full flex items-center justify-center mb-4 mx-auto shadow-sm"><PieChart size={40} className="text-blue-600" /></div>
+                     <h2 className="text-2xl font-bold text-slate-800">Vue d'ensemble du patrimoine</h2>
+                     <p className="max-w-md text-center mt-2 text-slate-500">Avancement global des audits sur {buildings.length} bâtiment(s).</p>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6 w-full max-w-4xl">
+                     <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200 flex flex-col items-center"><span className="text-4xl font-bold text-blue-600 mb-2">{calculateGlobalProgress()}%</span><span className="text-sm font-medium text-slate-500 uppercase tracking-wide">Avancement Total</span></div>
+                     <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200 flex flex-col items-center"><span className="text-4xl font-bold text-slate-800 mb-2">{auditItems.length}</span><span className="text-sm font-medium text-slate-500 uppercase tracking-wide">Points de contrôle</span></div>
+                     <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200 flex flex-col items-center"><span className="text-4xl font-bold text-green-600 mb-2">{works.length}</span><span className="text-sm font-medium text-slate-500 uppercase tracking-wide">Postes de travaux</span></div>
+                  </div>
+                  <div className="w-full max-w-2xl bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+                    <div className="bg-slate-50 px-6 py-3 border-b border-slate-200 font-semibold text-slate-700 text-sm">Détail par bâtiment</div>
+                    <div className="p-4 space-y-4">
+                      {buildings.map(b => {
+                        const prog = calculateBuildingProgress(b.id);
+                        return (
+                          <div key={b.id} className="flex items-center gap-4">
+                            <div className="w-32 font-medium text-slate-800 truncate">{b.name}</div>
+                            <div className="flex-1 h-3 bg-slate-100 rounded-full overflow-hidden"><div className="h-full bg-blue-500 transition-all duration-500 ease-out" style={{ width: `${prog}%` }}></div></div>
+                            <div className="w-12 text-right font-bold text-sm text-slate-600">{prog}%</div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </div>
+            ) : viewMode === 'identification' ? (
+                renderIdentification()
+            ) : viewMode === 'synthese' ? (
+                renderSynthesis()
+            ) : (
+                renderStandardTab()
+            )}
+        </div>
+      </div>
+
+      {deleteModal.show && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+            <div className="bg-white rounded-xl shadow-2xl p-6 max-w-sm w-full text-center">
+                <AlertTriangle className="h-10 w-10 text-red-500 mx-auto mb-4" />
+                <h3 className="font-bold text-lg mb-2">{deleteModal.type === 'building' ? 'Supprimer le bâtiment ?' : deleteModal.type === 'tab' ? 'Supprimer la catégorie ?' : 'Confirmer la suppression'}</h3>
+                <p className="text-sm text-slate-500 mb-6">{deleteModal.type === 'building' ? "Toutes les données associées à ce bâtiment seront perdues définitivement." : "Cette action est irréversible."}</p>
+                <div className="flex gap-2 mt-6">
+                    <button onClick={() => setDeleteModal({ show: false })} className="flex-1 py-2 bg-slate-100 rounded hover:bg-slate-200">Annuler</button>
+                    <button onClick={confirmDeletion} className="flex-1 py-2 bg-red-600 text-white rounded hover:bg-red-700">Supprimer</button>
+                </div>
+            </div>
+        </div>
+      )}
+
+      {photoModal.show && photoModal.photo && (
+        <div className="fixed inset-0 bg-black/90 z-50 flex flex-col p-4 select-none" onMouseMove={handleEditorMouseMove} onMouseUp={handleEditorMouseUp}>
+            <div className="flex justify-between text-white mb-4 shrink-0">
+                <div className="flex gap-4 items-center">
+                  <h3 className="font-bold flex gap-2 mr-4"><Edit2 /> Éditeur Photo</h3>
+                  <div className="flex bg-slate-800 rounded-lg p-1 border border-slate-700">
+                    <button onClick={() => setPhotoModal(p => ({...p, mode: 'annotate'}))} className={`px-3 py-1.5 rounded flex items-center gap-2 text-sm ${photoModal.mode === 'annotate' ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-white'}`}><MousePointer2 size={16} /> Annoter</button>
+                    <button onClick={() => setPhotoModal(p => ({...p, mode: 'crop'}))} className={`px-3 py-1.5 rounded flex items-center gap-2 text-sm ${photoModal.mode === 'crop' ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-white'}`}><Crop size={16} /> Recadrer</button>
+                  </div>
+                  {photoModal.mode === 'crop' && (
+                    <div className="flex items-center gap-2 ml-4 animate-in fade-in">
+                      <ZoomIn size={16} className="text-slate-400"/>
+                      <input type="range" min="1" max="3" step="0.1" value={photoModal.scale} onChange={(e) => setPhotoModal(p => ({...p, scale: parseFloat(e.target.value)}))} className="w-24 accent-blue-500" />
+                      <span className="text-xs text-slate-400 w-8">{photoModal.scale}x</span>
+                      <div className="text-xs text-orange-400 flex items-center gap-1 ml-2 border border-orange-900/50 bg-orange-900/20 px-2 py-1 rounded"><Move size={12} /> Glisser pour déplacer</div>
+                    </div>
+                  )}
+                </div>
+                <div className="flex gap-2">
+                    {photoModal.mode === 'annotate' && <button onClick={() => setPhotoModal(p => ({...p, photo: {...p.photo, markers: p.photo.markers.slice(0, -1)}}))} className="flex gap-2 items-center bg-slate-700 px-3 py-1 rounded hover:bg-slate-600"><Undo2 size={14}/> Annuler</button>}
+                    {photoModal.mode === 'crop' ? <button onClick={applyCrop} className="bg-green-600 px-4 py-1 rounded font-bold hover:bg-green-500 flex items-center gap-2"><CheckCircle2 size={16}/> Valider le recadrage</button> : <button onClick={savePhotoEdits} className="bg-blue-600 px-4 py-1 rounded font-bold hover:bg-blue-500 flex items-center gap-2"><Save size={16}/> Sauvegarder</button>}
+                    <button onClick={() => setPhotoModal({show:false})} className="p-1 hover:bg-slate-800 rounded"><X size={24} /></button>
+                </div>
+            </div>
+            <div className="flex-1 bg-black flex items-center justify-center relative overflow-hidden rounded-lg border border-slate-800" ref={editorContainerRef} onMouseDown={handleEditorMouseDown}>
+                <div className="relative inline-block origin-center transition-transform duration-75" style={{ transform: `translate(${photoModal.offset.x}px, ${photoModal.offset.y}px) scale(${photoModal.scale})`, cursor: photoModal.mode === 'crop' ? (isDraggingRef.current ? 'grabbing' : 'grab') : 'crosshair' }} onClick={handleImageClick}>
+                    <img ref={editorImageRef} src={photoModal.photo.url} className="max-h-[80vh] object-contain block pointer-events-none" alt="Editing" />
+                    {photoModal.photo.markers?.map(m => (
+                        <div key={m.id} className="absolute w-8 h-8 pointer-events-none drop-shadow-lg" style={{ left: `${m.x}%`, top: `${m.y}%`, transform: 'translate(-50%, -50%) rotate(45deg)' }}>
+                           <div className="text-red-600 filter drop-shadow-md"><ArrowRight size={48} className="transform rotate-180" strokeWidth={3} /></div>
+                        </div>
+                    ))}
+                </div>
+            </div>
+            {photoModal.mode === 'annotate' && <div className="mt-4 shrink-0 text-center text-slate-500 text-sm">Cliquez sur l'image pour ajouter une flèche.</div>}
+        </div>
+      )}
+    </div>
+  );
+};
+
+export default function App() {
+  return <AuditFacade />;
+}
